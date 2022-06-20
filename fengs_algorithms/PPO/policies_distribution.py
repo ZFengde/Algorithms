@@ -316,7 +316,6 @@ class ActorCriticPolicy(nn.Module):
 
     def forward(self, obs, mode='sample'):
         shared_latent = torch.tanh(self.common_layer(obs))
-
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
 
@@ -361,7 +360,6 @@ class ActorCriticPolicy(nn.Module):
 
     def predict(self, obs):
         shared_latent = torch.tanh(self.common_layer(obs))
-
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         actions = self.action_net(latent_pi)
 
