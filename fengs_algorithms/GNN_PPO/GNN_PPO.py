@@ -13,7 +13,7 @@ class GNN_PPO():
     def __init__(
         self,
         env, 
-        policy = ActorCriticPolicy, 
+        policy = GNN_ActorCriticPolicy, 
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         n_rollout_steps: int = 2048,
