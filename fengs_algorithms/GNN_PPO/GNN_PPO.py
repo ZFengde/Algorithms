@@ -1,12 +1,11 @@
-import datetime
 import os
 import time
-import torch
+import datetime
 import numpy as np
-from torch.optim import Adam
 import torch
 import torch.nn.functional as F
-from fengs_algorithms.GNN_PPO.policies_distribution import ActorCriticPolicy
+from torch.optim import Adam
+from fengs_algorithms.GNN_PPO.policies_distribution import GNN_ActorCriticPolicy
 from fengs_algorithms.common.buffer import RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 

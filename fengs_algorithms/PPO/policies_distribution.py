@@ -1,5 +1,5 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 from torch.distributions import Normal
 
 class StateDependentNoiseDistribution():
@@ -202,7 +202,6 @@ class DiagGaussianDistribution():
     """
 
     def __init__(self, action_dim: int):
-        super(DiagGaussianDistribution, self).__init__()
         self.action_dim = action_dim
         self.mean_actions = None
         self.log_std = None

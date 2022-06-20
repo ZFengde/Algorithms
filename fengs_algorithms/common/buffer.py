@@ -1,8 +1,6 @@
-import torch
 import numpy as np
+import torch
 from gym import spaces
-import numpy as np
-import torch
 from typing import NamedTuple
 
 class RolloutBufferSamples(NamedTuple):

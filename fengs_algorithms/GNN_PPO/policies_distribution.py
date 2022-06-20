@@ -1,49 +1,9 @@
-import torch.nn as nn
+import dgl
 import dgl.function as fn
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
-
-class GCNLayer(nn.Module):
-    def __init__(self, in_feats, out_feats):
-        super(GCNLayer, self).__init__()
-        # linear process in GCN is linear transformation from in_feats to out_feats
-        self.gcn_msg = fn.copy_u(u='h', out='m')
-        self.gcn_reduce = fn.sum(msg='m', out='h')
-        self.linear = nn.Linear(in_feats, out_feats)
-
-    def forward(self, g, observations):
-        # Creating a local scope so that all the stored ndata and edata
-        # (such as the `'h'` ndata below) are automatically popped out
-        # when the scope exits.
-        with g.local_scope():
-            g.ndata['h'] = observations
-            # message, aggregation
-            g.update_all(self.gcn_msg, self.gcn_reduce)
-            h = g.ndata['h']
-            
-            return self.linear(h)
-
-class GCN(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(GCN, self).__init__()
-        '''
-        here is the feature sizes, so for each GCN layer
-        we implement once forward operation as above, 
-        i.e., take as input observation node feature
-        then, operations like below:
-        doubld operations:
-        input feature message (copy) -- aggregation (sum) -- update (linear) 
-        2 --> 8
-        8 --> 1
-        '''
-        self.layer1 = GCNLayer(input_dim, 8)
-        self.layer2 = GCNLayer(8, output_dim)
-
-    def forward(self, g, observations):
-        x = F.relu(self.layer1(g, observations))
-        x = self.layer2(g, x)
-        return x
 
 class StateDependentNoiseDistribution():
     """
@@ -237,6 +197,47 @@ class StateDependentNoiseDistribution():
             return self.mode()
         return self.sample()
 
+class GCNLayer(nn.Module):
+    def __init__(self, in_feats, out_feats):
+        super(GCNLayer, self).__init__()
+        # linear process in GCN is linear transformation from in_feats to out_feats
+        self.gcn_msg = fn.copy_u(u='h', out='m')
+        self.gcn_reduce = fn.sum(msg='m', out='h')
+        self.linear = nn.Linear(in_feats, out_feats)
+
+    def forward(self, g, observations):
+        # Creating a local scope so that all the stored ndata and edata
+        # (such as the `'h'` ndata below) are automatically popped out
+        # when the scope exits.
+        with g.local_scope():
+            g.ndata['h'] = observations
+            # message, aggregation
+            g.update_all(self.gcn_msg, self.gcn_reduce)
+            h = g.ndata['h']
+            
+            return self.linear(h)
+
+class GCN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(GCN, self).__init__()
+        '''
+        here is the feature sizes, so for each GCN layer
+        we implement once forward operation as above, 
+        i.e., take as input observation node feature
+        then, operations like below:
+        doubld operations:
+        input feature message (copy) -- aggregation (sum) -- update (linear) 
+        2 --> 8
+        8 --> 1
+        '''
+        self.layer1 = GCNLayer(input_dim, 8)
+        self.layer2 = GCNLayer(8, output_dim)
+
+    def forward(self, g, observations):
+        x = F.relu(self.layer1(g, observations))
+        x = self.layer2(g, x)
+        return x
+
 class DiagGaussianDistribution():
     """
     Gaussian distribution with diagonal covariance matrix, for continuous actions.
@@ -335,14 +336,17 @@ class DiagGaussianDistribution():
             return self.mode()
         return self.sample()
 
-class ActorCriticPolicy(nn.Module):
+class GNN_ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
         input_dim : int, 
         actor_output_dim : int, 
         log_std_init = 0.0 # according to the StateDependentNoiseDistribution class from baseline3
     ):
-        super(ActorCriticPolicy, self).__init__()
+        super(GNN_ActorCriticPolicy, self).__init__()
+        src_ids = torch.tensor([1, 2, 3, 4, 5, 6, 7, 0, 0, 1, 2, 3, 4, 5, 6, 7])
+        dst_ids = torch.tensor([0, 0, 0, 0, 0, 0, 0, 7, 0, 1, 2, 3, 4, 5, 6, 7])
+
         self.log_std_init = log_std_init
         latent_dim_pi = 64
         

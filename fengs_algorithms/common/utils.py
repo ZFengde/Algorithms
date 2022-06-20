@@ -1,8 +1,8 @@
+import os
 import numpy as np
 import torch
-import os
-from torch.utils.tensorboard import SummaryWriter
 from collections import defaultdict
+from torch.utils.tensorboard import SummaryWriter
 
 class Logger():
     def __init__(
