@@ -339,31 +339,37 @@ class DiagGaussianDistribution():
 class GNN_ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
-        input_dim : int, 
+        node_input_dim: int,
+        node_output_dim: int,
+        feature_dim : int, 
         actor_output_dim : int, 
+        latent_dim_pi : int = 64,
         log_std_init = 0.0 # according to the StateDependentNoiseDistribution class from baseline3
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
-        src_ids = torch.tensor([1, 2, 3, 4, 5, 6, 7, 0, 0, 1, 2, 3, 4, 5, 6, 7])
-        dst_ids = torch.tensor([0, 0, 0, 0, 0, 0, 0, 7, 0, 1, 2, 3, 4, 5, 6, 7])
 
-        self.log_std_init = log_std_init
-        latent_dim_pi = 64
-        
-        self.common_layer = nn.Linear(input_dim, 64)
+        src_ids = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3])
+        dst_ids = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3])
+        self.g = dgl.graph((src_ids, dst_ids))
+        self.gnn = GCN(node_input_dim, node_output_dim)
+
+        self.common_layer = nn.Linear(feature_dim, 64)
         self.actor_latent_layer = nn.Linear(64, latent_dim_pi)
         self.critic_latent_layer = nn.Linear(64, 64)
 
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
 
-
+        self.log_std_init = log_std_init
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=latent_dim_pi, log_std_init=self.log_std_init
             )
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, mode='sample'):
-        shared_latent = torch.tanh(self.common_layer(obs))
+        
+        nodes_info = obs.view(4, 2)
+        features = torch.tanh(self.gnn(self.g, nodes_info))
+        shared_latent = torch.tanh(self.common_layer(features.T))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
@@ -423,3 +429,12 @@ class GNN_ActorCriticPolicy(nn.Module):
         """
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
+
+    def temporal_graph_buffer(self):
+        pass
+
+gnn_ppo = GNN_ActorCriticPolicy(node_input_dim=2, node_output_dim=1, feature_dim=4, actor_output_dim=2)
+
+a = torch.rand(8)
+
+print(gnn_ppo(a))

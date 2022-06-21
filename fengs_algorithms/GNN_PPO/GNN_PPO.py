@@ -25,10 +25,10 @@ class GNN_PPO():
         vf_coef: float = 0.5,
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
-        experiment_name = 'PPO',
+        experiment_name = 'GNN_PPO',
         buffer_cls = RolloutBuffer,
         logger = Logger,
-        save_model_name = 'PPO',
+        save_model_name = 'GNN_PPO',
         parallel = True
     ):
 
@@ -65,8 +65,10 @@ class GNN_PPO():
         )
 
         self.policy = policy(
-            input_dim=self.env.observation_space.shape[0], 
-            actor_output_dim=2,).to(self.device)
+            node_input_dim=2, 
+            node_output_dim=1, 
+            feature_dim=4, 
+            actor_output_dim=2).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
         self.num_timesteps = 0
