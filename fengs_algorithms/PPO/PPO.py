@@ -64,7 +64,7 @@ class PPO():
         )
 
         self.policy = policy(
-            input_dim=self.env.observation_space.shape[0], 
+            feature_dim=self.env.observation_space.shape[0], 
             actor_output_dim=2,).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
@@ -211,7 +211,7 @@ class PPO():
         return self
 
     def save(self):
-        models_dir = os.path.join(f'{self.experiment_name}', 'models', f'{self.time}')
+        models_dir = os.path.join(f'{self.experiment_name}_Record', 'models', f'{self.time}')
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
         torch.save(self.policy.state_dict(), f'{models_dir}/{self.num_timesteps}')
