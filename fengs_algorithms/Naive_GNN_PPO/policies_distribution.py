@@ -336,7 +336,7 @@ class DiagGaussianDistribution():
             return self.mode()
         return self.sample()
 
-class GNN_ActorCriticPolicy(nn.Module):
+class Naive_GNN_ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
         node_input_dim: int,
@@ -347,7 +347,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         device = None,
         log_std_init = 0.0, # according to the StateDependentNoiseDistribution class from baseline3
     ):
-        super(GNN_ActorCriticPolicy, self).__init__()
+        super(Naive_GNN_ActorCriticPolicy, self).__init__()
         self.device = device
         src_ids = torch.tensor([0, 1, 2, 3, 4, 5, 0, 1, 0, 2, 1, 3, 2, 3, 2, 4, 3, 5, 4, 5])
         dst_ids = torch.tensor([0, 1, 2, 3, 4, 5, 1, 0, 2, 0, 3, 1, 3, 2, 4, 2, 5, 3, 5, 4])
