@@ -1,1 +1,1 @@
-from fengs_algorithms.GNN_PPO import PPO
+from fengs_algorithms.GNN_PPO import GNN_PPO

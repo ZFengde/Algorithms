@@ -68,7 +68,8 @@ class GNN_PPO():
             node_input_dim=2, 
             node_output_dim=1, 
             feature_dim=4, 
-            actor_output_dim=2).to(self.device)
+            actor_output_dim=2,
+            device=self.device).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
         self.num_timesteps = 0
