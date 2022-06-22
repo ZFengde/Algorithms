@@ -119,6 +119,7 @@ class GNN_PPO():
                     rollout_ep_len.append(self.episode_length_buffer[idx])
                     self.episode_length_buffer[idx] = 0
                     self.episode_reward_buffer[idx] = 0
+                    self.policy.nodes_info_reset(idx)
                     if (infos[idx].get("terminal_observation") is not None 
                             # this means if "TimeLimit.truncated" doesn't have value, then output False
                             # only when time out of timelimit, continue

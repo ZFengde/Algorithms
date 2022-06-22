@@ -443,16 +443,6 @@ class GNN_ActorCriticPolicy(nn.Module):
 
     def forward_gnn_process(self, obs):
         # for forward
-        self.node_info_process(obs)
-        # now self.nodes_info is batch * nodes_num * info_dimen
-        features = self.gnn(self.g, torch.transpose(self.nodes_info, 0, 1))
-        # batch * nodes_num, 6 * 4
-        features = torch.transpose(features, 0, 1).squeeze()
-        # 6 * 8 = 6 * 4 + 6 * 4
-        features = torch.cat((features, obs[:, 2: 6]), dim=1)
-        return features
-
-    def node_info_process(self, obs):
         obs = obs.view(-1, 4, 2)
         # assign target pos information to node 0
         self.nodes_info[:, 0] = obs[:, 3]
@@ -461,6 +451,13 @@ class GNN_ActorCriticPolicy(nn.Module):
         self.nodes_info[:, 1:3] = self.nodes_info[:, 2:]
         # assign mobile robot pos information at time t to node 3
         self.nodes_info[:, 3] = obs[:, 0]
+        # now self.nodes_info is batch * nodes_num * info_dimen
+        features = self.gnn(self.g, torch.transpose(self.nodes_info, 0, 1))
+        # batch * nodes_num, 6 * 4
+        features = torch.transpose(features, 0, 1).squeeze()
+        # 6 * 8 = 6 * 4 + 6 * 4
+        features = torch.cat((features, obs[:, 2: 6]), dim=1)
+        return features
 
     def batch_gnn_process(self, obs):
         # generate node info, 4 * 2
@@ -478,3 +475,6 @@ class GNN_ActorCriticPolicy(nn.Module):
         features = self.gnn(self.g, nodes_info).squeeze()
         features = torch.cat((features, obs[2: 6]))
         return features     
+
+    def nodes_info_reset(self, idx):
+        self.nodes_info[idx] = 0
