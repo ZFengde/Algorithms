@@ -67,8 +67,9 @@ class GNN_PPO():
         self.policy = policy(
             node_input_dim=2, 
             node_output_dim=1, 
-            feature_dim=4, 
+            feature_dim=8, 
             actor_output_dim=2,
+            n_envs=self.n_envs,
             device=self.device).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
@@ -159,9 +160,8 @@ class GNN_PPO():
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
-                actions = rollout_data.actions
 
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, rollout_data.actions)
                 values = values.flatten()
 
                 # calculate and normalise the advantages

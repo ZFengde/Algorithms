@@ -107,9 +107,12 @@ class RolloutBuffer():
             else:
                 next_non_terminal = 1.0 - self.episode_starts[step + 1]
                 next_values = self.values[step + 1]
+            # delta = r + gamma * V(s+1) - V(s)
             delta = self.rewards[step] + self.gamma * next_values * next_non_terminal - self.values[step]
+            # gae(s) = delta + gamma * lambda * gae(s+1)
             last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
             self.advantages[step] = last_gae_lam
+        # A(s) = R - V(S)
         self.returns = self.advantages + self.values
 
     def add(

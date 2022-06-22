@@ -367,11 +367,7 @@ class Naive_GNN_ActorCriticPolicy(nn.Module):
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, mode='sample'):
-        # batch * 4 * 2
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        features = self.gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -398,10 +394,7 @@ class Naive_GNN_ActorCriticPolicy(nn.Module):
             return distribution.mean()
 
     def predict_values(self, obs):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        features = self.gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -410,10 +403,7 @@ class Naive_GNN_ActorCriticPolicy(nn.Module):
         return values
 
     def evaluate_actions(self, obs, actions):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        features = self.gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -425,10 +415,7 @@ class Naive_GNN_ActorCriticPolicy(nn.Module):
         return values, log_prob, distribution.entropy()
 
     def predict(self, obs):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        features = self.gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
@@ -445,8 +432,11 @@ class Naive_GNN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def graph_info_process(self):
-        pass
+    def gnn_process(self, obs):
+        nodes_info = obs.view(-1, 4, 2)
+        nodes_info = torch.transpose(nodes_info, 0, 1)
+        features = torch.tanh(self.gnn(self.g, nodes_info))
+        features = torch.transpose(features, 0, 1).squeeze()
+
+        return features
     
-    def temporal_graph_buffer(self):
-        pass

@@ -343,16 +343,20 @@ class GNN_ActorCriticPolicy(nn.Module):
         node_output_dim: int,
         feature_dim : int, 
         actor_output_dim : int, 
+        n_envs : int,
         latent_dim_pi : int = 64,
         device = None,
         log_std_init = 0.0, # according to the StateDependentNoiseDistribution class from baseline3
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 1, 2, 3, 4, 5, 0, 1, 0, 2, 1, 3, 2, 3, 2, 4, 3, 5, 4, 5])
-        dst_ids = torch.tensor([0, 1, 2, 3, 4, 5, 1, 0, 2, 0, 3, 1, 3, 2, 4, 2, 5, 3, 5, 4])
+        # src_ids = torch.tensor([0, 1, 2, 3, 4, 5, 0, 1, 0, 2, 1, 3, 2, 3, 2, 4, 3, 5, 4, 5])
+        # dst_ids = torch.tensor([0, 1, 2, 3, 4, 5, 1, 0, 2, 0, 3, 1, 3, 2, 4, 2, 5, 3, 5, 4])
+        src_ids = torch.tensor([0, 1, 2, 3, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3])
+        dst_ids = torch.tensor([0, 1, 2, 3, 1, 2, 3, 0, 2, 0, 1, 3, 0, 2])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.gnn = GCN(node_input_dim, node_output_dim)
+        self.nodes_info = torch.zeros(n_envs, 4, 2).to(device)
 
         self.common_layer = nn.Linear(feature_dim, 64)
         self.actor_latent_layer = nn.Linear(64, latent_dim_pi)
@@ -367,11 +371,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, mode='sample'):
-        # batch * 4 * 2
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        features = self.forward_gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -398,10 +398,10 @@ class GNN_ActorCriticPolicy(nn.Module):
             return distribution.mean()
 
     def predict_values(self, obs):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        if obs.dim() == 2:
+            features = self.batch_gnn_process(obs)
+        else:
+            features = self.single_gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -410,10 +410,10 @@ class GNN_ActorCriticPolicy(nn.Module):
         return values
 
     def evaluate_actions(self, obs, actions):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
+        if obs.dim() == 2:
+            features = self.batch_gnn_process(obs)
+        else:
+            features = self.single_gnn_process(obs)
         shared_latent = torch.tanh(self.common_layer(features))
 
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
@@ -425,11 +425,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         return values, log_prob, distribution.entropy()
 
     def predict(self, obs):
-        nodes_info = obs.view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        features = torch.tanh(self.gnn(self.g, nodes_info))
-        features = torch.transpose(features, 0, 1).squeeze()
-        shared_latent = torch.tanh(self.common_layer(features))
+        shared_latent = torch.tanh(self.common_layer(obs))
 
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         actions = self.action_net(latent_pi)
@@ -445,8 +441,40 @@ class GNN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def graph_info_process(self):
-        pass
-    
-    def temporal_graph_buffer(self):
-        pass
+    def forward_gnn_process(self, obs):
+        # for forward
+        self.node_info_process(obs)
+        # now self.nodes_info is batch * nodes_num * info_dimen
+        features = self.gnn(self.g, torch.transpose(self.nodes_info, 0, 1))
+        # batch * nodes_num, 6 * 4
+        features = torch.transpose(features, 0, 1).squeeze()
+        # 6 * 8 = 6 * 4 + 6 * 4
+        features = torch.cat((features, obs[:, 2: 6]), dim=1)
+        return features
+
+    def node_info_process(self, obs):
+        obs = obs.view(-1, 4, 2)
+        # assign target pos information to node 0
+        self.nodes_info[:, 0] = obs[:, 3]
+        # shift t, t-1 information to t-1, t-2
+        # corresponding to node 2, 3 --- > node 1, 2
+        self.nodes_info[:, 1:3] = self.nodes_info[:, 2:]
+        # assign mobile robot pos information at time t to node 3
+        self.nodes_info[:, 3] = obs[:, 0]
+
+    def batch_gnn_process(self, obs):
+        # generate node info, 4 * 2
+        nodes_info = torch.cat((obs[:, 6:], obs[:, 0: 2], obs[:, 0: 2], obs[:, 0: 2])).view(-1, 4, 2)
+        # after gnn process obtain 4 * 1
+        features = self.gnn(self.g, torch.transpose(nodes_info, 0, 1))
+        # batch * nodes_num, 6 * 4
+        features = torch.transpose(features, 0, 1).squeeze()
+        # 6 * 8 = 6 * 4 + 6 * 4
+        features = torch.cat((features, obs[:, 2: 6]), dim=1)
+        return features     
+
+    def single_gnn_process(self, obs):
+        nodes_info = torch.cat((obs[6:], obs[0: 2], obs[0: 2], obs[0: 2])).view(4, 2)
+        features = self.gnn(self.g, nodes_info).squeeze()
+        features = torch.cat((features, obs[2: 6]))
+        return features     
