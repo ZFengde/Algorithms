@@ -94,8 +94,8 @@ class PPO():
                 actions, values, log_probs = self.policy(obs_tensor)
             actions = actions.cpu().numpy()
             
-            clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-            new_obs, rewards, dones, infos = self.env.step(clipped_actions)
+            actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
+            new_obs, rewards, dones, infos = self.env.step(actions)
             
             # so num_timesteps count all environment altogether
             self.num_timesteps += self.n_envs
@@ -233,9 +233,9 @@ class PPO():
                     obs_tensor = obs_as_tensor(obs, self.device)
                     action = self.policy.predict(obs_tensor)
                 action = action.cpu().numpy()
-
+                print(action)
                 #this can cause suboptimal action
-                action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+                # action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
                 obs, reward, done, _ = self.env.step(action)
                 
                 if self.env.use_gui == True:
