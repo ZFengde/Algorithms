@@ -219,6 +219,7 @@ class GNN_PPO():
         models_dir = os.path.join(f'{self.experiment_name}_Record', 'models', f'{self.time}')
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
+            print(f'logging to {models_dir}')
         torch.save(self.policy.state_dict(), f'{models_dir}/{self.num_timesteps}_{self.save_model_name}')
 
     def load(self, path):
