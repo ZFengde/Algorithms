@@ -86,6 +86,7 @@ class PPO():
 
         n_steps = 0
         self.rollout_buffer.reset()
+        ep_num_success = 0
 
         while n_steps < self.n_rollout_steps:
             with torch.no_grad():
@@ -114,6 +115,8 @@ class PPO():
                     rollout_ep_len.append(self.episode_length_buffer[idx])
                     self.episode_length_buffer[idx] = 0
                     self.episode_reward_buffer[idx] = 0
+                    if infos[idx].get("Success") == 'Yes':
+                        ep_num_success += 1
                     if (infos[idx].get("terminal_observation") is not None 
                             # this means if "TimeLimit.truncated" doesn't have value, then output False
                             # only when time out of timelimit, continue
@@ -139,13 +142,18 @@ class PPO():
         # we need to konw the values of last step of the buffer and the corresponding done condition
         self.rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
+        ep_num_rollout = len(rollout_ep_rewards)
+        success_rate = ep_num_success/ep_num_rollout
         if len(rollout_ep_rewards) > 0:
             ep_rew_mean = np.mean(rollout_ep_rewards)
             ep_len_mean = np.mean(rollout_ep_len)
-            self.logger.record("rollout/ep_num_rollout", len(rollout_ep_rewards))
+            self.logger.record("rollout/success_rate", success_rate)
             self.logger.record("rollout/ep_rew_mean", ep_rew_mean)
+            self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
+            self.logger.record("rollout/ep_num_success", ep_num_success)
             self.logger.record("rollout/ep_len_mean", ep_len_mean)
             self.logger.to_tensorboard(data=ep_rew_mean, time_count=self.num_timesteps)
+            self.logger.to_tensorboard(data=success_rate, time_count=self.num_timesteps)
         self.logger.record('rollout/timesteps_so_far', self.num_timesteps)
 
         return True

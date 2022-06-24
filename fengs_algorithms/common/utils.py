@@ -30,7 +30,10 @@ class Logger():
 
     def write_out(self):
         for key in self.name_to_value:
-            print(key,':' ,round(self.name_to_value[key], 2))
+            if 'rate' in key:
+                print(key,':', '{:.2%}'.format(self.name_to_value[key]))
+            else:
+                print(key, ':', round(self.name_to_value[key], 2))
         print()
 
 def obs_as_tensor(obs, device):
