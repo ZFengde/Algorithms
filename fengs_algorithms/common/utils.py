@@ -25,8 +25,8 @@ class Logger():
     def record(self, key, value):
         self.name_to_value[key] = value
 
-    def to_tensorboard(self, data, time_count):
-        self.writer.add_scalar('Episode_reward_mean', data, time_count)
+    def to_tensorboard(self, name, data, time_count):
+        self.writer.add_scalar(name, data, time_count)
 
     def write_out(self):
         for key in self.name_to_value:
@@ -35,6 +35,10 @@ class Logger():
             else:
                 print(key, ':', round(self.name_to_value[key], 2))
         print()
+
+    def close(self):
+        if self.writer:
+            self.writer.close()
 
 def obs_as_tensor(obs, device):
     obs = np.array(obs)
