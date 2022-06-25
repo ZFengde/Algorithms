@@ -196,7 +196,51 @@ class RolloutBuffer():
             self.returns[batch_inds].flatten(),
         )
         return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
-        
+
+    def temporal_sample(self, batch_size):
+                # generate random permutation for those data
+        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        # Prepare the data
+        # this is a name holder, for change the corresponding value in self.__dict__ 
+        if not self.generator_ready:
+            _tensor_names = [
+                "observations",
+                "actions",
+                "values",
+                "log_probs",
+                "advantages",
+                "returns",
+            ]
+
+            # this is for flat data in buffer
+            # e.g., original buffer has buffer_size * n_envs actions,
+            # which is buffer_size * n_envs * action_dim 3d tensor
+            # here we need to change it into (buffer_size * n_envs) * action_dim 2d tensor
+            for tensor in _tensor_names:
+                self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
+            self.generator_ready = True
+
+        # Return everything, don't create minibatches, batch_size = 64
+        if batch_size is None:
+            batch_size = self.buffer_size * self.n_envs
+
+        # this is for epoch, since for every epoch we need a minibatch from rollout_buffer
+        start_idx = 0
+        while start_idx < self.buffer_size * self.n_envs:
+            yield self._get_temporal_samples(indices[start_idx : start_idx + batch_size])
+            start_idx += batch_size
+
+    def _get_temporal_samples(self, batch_inds):
+        data = (
+            self.observations[batch_inds],
+            self.actions[batch_inds],
+            self.values[batch_inds].flatten(),
+            self.log_probs[batch_inds].flatten(),
+            self.advantages[batch_inds].flatten(),
+            self.returns[batch_inds].flatten(),
+        )
+        return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
+
     def to_torch(self, array: np.ndarray, copy: bool = True):
         if copy:
             return torch.tensor(array).to(self.device)

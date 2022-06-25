@@ -115,7 +115,7 @@ class PPO():
                     rollout_ep_len.append(self.episode_length_buffer[idx])
                     self.episode_length_buffer[idx] = 0
                     self.episode_reward_buffer[idx] = 0
-                    if infos[idx].get("Success") == 'Yes':
+                    if infos[idx].get('Success') == 'Yes':
                         ep_num_success += 1
                     if (infos[idx].get("terminal_observation") is not None 
                             # this means if "TimeLimit.truncated" doesn't have value, then output False
@@ -223,7 +223,7 @@ class PPO():
         models_dir = os.path.join(f'{self.experiment_name}_Record', 'models', f'{self.time}')
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
-            print(f'logging to {models_dir}')
+            print(f'Logging to {models_dir}')
         torch.save(self.policy.state_dict(), f'{models_dir}/{self.num_timesteps}')
 
     def load(self, path):
