@@ -145,14 +145,12 @@ class PPO():
         ep_num_rollout = len(rollout_ep_rewards)
         success_rate = ep_num_success/ep_num_rollout
         if len(rollout_ep_rewards) > 0:
-            ep_rew_mean = np.mean(rollout_ep_rewards)
-            ep_len_mean = np.mean(rollout_ep_len)
-            self.logger.record("rollout/ep_rew_mean", ep_rew_mean)
+            self.logger.record("rollout/ep_rew_mean", np.mean(rollout_ep_rewards))
             self.logger.record("rollout/success_rate", success_rate)
             self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
             self.logger.record("rollout/ep_num_success", ep_num_success)
-            self.logger.record("rollout/ep_len_mean", ep_len_mean)
-            self.logger.to_tensorboard(name='Episode_reward_mean', data=ep_rew_mean, time_count=self.num_timesteps)
+            self.logger.record("rollout/ep_len_mean", np.mean(rollout_ep_len))
+            self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
             self.logger.to_tensorboard(name='Success_rate', data=success_rate, time_count=self.num_timesteps)
             self.logger.close()
         self.logger.record('rollout/timesteps_so_far', self.num_timesteps)
@@ -164,9 +162,7 @@ class PPO():
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
-                actions = rollout_data.actions
-
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, rollout_data.actions)
                 values = values.flatten()
 
                 # calculate and normalise the advantages

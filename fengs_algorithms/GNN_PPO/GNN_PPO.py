@@ -67,9 +67,7 @@ class GNN_PPO():
         self.policy = policy(
             node_input_dim=2, 
             node_output_dim=1, 
-            feature_dim=8, 
             actor_output_dim=2,
-            n_envs=self.n_envs,
             device=self.device).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
@@ -93,6 +91,7 @@ class GNN_PPO():
 
         n_steps = 0
         self.rollout_buffer.reset()
+        ep_num_success = 0
 
         while n_steps < self.n_rollout_steps:
             with torch.no_grad():
@@ -126,6 +125,8 @@ class GNN_PPO():
                     self.episode_reward_buffer[idx] = 0
                     self.t_1_info[idx] = np.zeros((1, 2))
                     self.t_2_info[idx] = np.zeros((1, 2))
+                    if infos[idx].get('Success') == 'Yes':
+                        ep_num_success += 1
                     if (infos[idx].get("terminal_observation") is not None 
                             and infos[idx].get("TimeLimit.truncated", False)):
                         terminal_obs = obs_as_tensor(infos[idx]["terminal_observation"], self.device)
@@ -152,11 +153,17 @@ class GNN_PPO():
         # we need to konw the values of last step of the buffer and the corresponding done condition
         self.rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
+        ep_num_rollout = len(rollout_ep_rewards)
+        success_rate = ep_num_success/ep_num_rollout
         if len(rollout_ep_rewards) > 0:
-            self.logger.record("rollout/ep_num_rollout", len(rollout_ep_rewards))
             self.logger.record("rollout/ep_rew_mean", np.mean(rollout_ep_rewards))
+            self.logger.record("rollout/success_rate", success_rate)
+            self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
+            self.logger.record("rollout/ep_num_success", ep_num_success)
             self.logger.record("rollout/ep_len_mean", np.mean(rollout_ep_len))
             self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
+            self.logger.to_tensorboard(name='Success_rate', data=success_rate, time_count=self.num_timesteps)
+            self.logger.close()
         self.logger.record('rollout/timesteps_so_far', self.num_timesteps)
 
         return True
@@ -227,7 +234,7 @@ class GNN_PPO():
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
             print(f'logging to {models_dir}')
-        torch.save(self.policy.state_dict(), f'{models_dir}/{self.num_timesteps}_{self.save_model_name}')
+        torch.save(self.policy.state_dict(), f'{models_dir}/{self.num_timesteps}')
 
     def load(self, path):
         self.policy.load_state_dict(torch.load(path))
