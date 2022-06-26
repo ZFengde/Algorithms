@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 from fengs_algorithms.GNN_PPO.GNN_policies_distribution import GNN_ActorCriticPolicy
-from fengs_algorithms.common.temp_gnn_buffer import Temp_RolloutBuffer
+from fengs_algorithms.common.buffer import Temp_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
 class GNN_PPO():
