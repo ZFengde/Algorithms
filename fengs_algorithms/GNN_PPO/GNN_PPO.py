@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 from fengs_algorithms.GNN_PPO.GNN_policies_distribution import GNN_ActorCriticPolicy
-from fengs_algorithms.common.buffer import RolloutBuffer
+from fengs_algorithms.common.temp_gnn_buffer import Temp_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
 class GNN_PPO():
@@ -26,7 +26,7 @@ class GNN_PPO():
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
         experiment_name = 'GNN_PPO',
-        buffer_cls = RolloutBuffer,
+        buffer_cls = Temp_RolloutBuffer,
         logger = Logger,
         save_model_name = 'GNN_PPO',
         parallel = True
@@ -79,6 +79,8 @@ class GNN_PPO():
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
+        self.t_1_info = np.zeros((self.n_envs, 2))
+        self.t_2_info = np.zeros((self.n_envs, 2))
         self._last_obs = None
         self._last_episode_starts = np.ones((self.n_envs,), dtype=bool)
 
@@ -94,9 +96,11 @@ class GNN_PPO():
 
         while n_steps < self.n_rollout_steps:
             with torch.no_grad():
+                temp_1 = obs_as_tensor(self.t_1_info, self.device)
+                temp_2 = obs_as_tensor(self.t_2_info, self.device)
                 # simply convert to pytorch tensor or to TensorDict
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
-                actions, values, log_probs = self.policy(obs_tensor)
+                actions, values, log_probs = self.policy(obs_tensor, temp_1, temp_2)
             actions = actions.cpu().numpy()
             
             clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
@@ -110,30 +114,33 @@ class GNN_PPO():
             self.episode_reward_buffer += rewards
             # in every step, check all envs if there is done
             # if so, pass the information to the buffer
+
+            self.t_2_info = self.t_1_info
+            self.t_1_info = new_obs[:, 0: 2]
             
             for idx, done in enumerate(dones):
                 if done:
-                    # log episode information within rollout 
-                    # and initialise the corresponding env_index info
                     rollout_ep_rewards.append(self.episode_reward_buffer[idx])
                     rollout_ep_len.append(self.episode_length_buffer[idx])
                     self.episode_length_buffer[idx] = 0
                     self.episode_reward_buffer[idx] = 0
-                    self.policy.nodes_info_reset(idx)
+                    self.t_1_info[idx] = np.zeros((1, 2))
+                    self.t_2_info[idx] = np.zeros((1, 2))
                     if (infos[idx].get("terminal_observation") is not None 
-                            # this means if "TimeLimit.truncated" doesn't have value, then output False
-                            # only when time out of timelimit, continue
                             and infos[idx].get("TimeLimit.truncated", False)):
-                        # the reason why don't directly use last obs is that in _worker of 
-                        # parallel vectorized env, if done,... = step(aciton), what return is obs = reset()
-                        # and the real last obs is store at (infos[idx]["terminal_observation"])
                         terminal_obs = obs_as_tensor(infos[idx]["terminal_observation"], self.device)
                         with torch.no_grad():
                             terminal_value = self.policy.predict_values(terminal_obs)
                         rewards[idx] += self.gamma * terminal_value
 
-            # done reset for specific environment is finish inside subproc_vec_env
-            self.rollout_buffer.add(self._last_obs, actions, rewards, self._last_episode_starts, values, log_probs)
+            self.rollout_buffer.add(
+                                    self._last_obs, 
+                                    actions, rewards, 
+                                    self._last_episode_starts, 
+                                    values, 
+                                    log_probs,
+                                    temp_1,
+                                    temp_2)
             self._last_obs = new_obs
             self._last_episode_starts = dones
 
@@ -146,12 +153,10 @@ class GNN_PPO():
         self.rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         if len(rollout_ep_rewards) > 0:
-            ep_rew_mean = np.mean(rollout_ep_rewards)
-            ep_len_mean = np.mean(rollout_ep_len)
             self.logger.record("rollout/ep_num_rollout", len(rollout_ep_rewards))
-            self.logger.record("rollout/ep_rew_mean", ep_rew_mean)
-            self.logger.record("rollout/ep_len_mean", ep_len_mean)
-            self.logger.to_tensorboard(data=ep_rew_mean, time_count=self.num_timesteps)
+            self.logger.record("rollout/ep_rew_mean", np.mean(rollout_ep_rewards))
+            self.logger.record("rollout/ep_len_mean", np.mean(rollout_ep_len))
+            self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
         self.logger.record('rollout/timesteps_so_far', self.num_timesteps)
 
         return True
@@ -161,8 +166,10 @@ class GNN_PPO():
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
-
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, rollout_data.actions)
+                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, 
+                                                                        rollout_data.actions, 
+                                                                        rollout_data.t_1_infos, 
+                                                                        rollout_data.t_2_infos)
                 values = values.flatten()
 
                 # calculate and normalise the advantages
@@ -237,6 +244,7 @@ class GNN_PPO():
                 with torch.no_grad():
                     # simply convert to pytorch tensor or to TensorDict
                     obs_tensor = obs_as_tensor(obs, self.device)
+                    # TODO, need to be added with temporal information here, not urgent 
                     action = self.policy.predict(obs_tensor)
                 action = action.cpu().numpy()
 
