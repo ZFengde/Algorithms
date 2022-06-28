@@ -1,9 +1,9 @@
 import dgl
-import dgl.function as fn
+import dgl.function.message as fn
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.distributions import Normal
+from dgl.nn.pytorch import RelGraphConv
 
 class StateDependentNoiseDistribution():
     """
@@ -201,21 +201,24 @@ class GCNLayer(nn.Module):
     def __init__(self, in_feats, out_feats):
         super(GCNLayer, self).__init__()
         # linear process in GCN is linear transformation from in_feats to out_feats
-        self.gcn_msg = fn.copy_u(u='h', out='m')
-        self.gcn_reduce = fn.sum(msg='m', out='h')
+        # TODO, need to add weight matrix here
+        self.gcn_msg = fn.u_mul_e('h', '_edge_weight', 'm')
+        self.gcn_reduce = fn.mean(msg='m', out='h')
+
         self.linear = nn.Linear(in_feats, out_feats)
 
-    def forward(self, g, observations):
+    def forward(self, graph, feat, weight, edge_weight, bias):
         # Creating a local scope so that all the stored ndata and edata
         # (such as the `'h'` ndata below) are automatically popped out
         # when the scope exits.
-        with g.local_scope():
-            g.ndata['h'] = observations
+        with graph.local_scope():
+            graph.edata['_edge_weight'] = edge_weight
+            graph.ndata['h'] = feat
             # message, aggregation
-            g.update_all(self.gcn_msg, self.gcn_reduce)
-            h = g.ndata['h']
-            
-            return self.linear(h)
+            graph.update_all(self.gcn_msg, self.gcn_reduce)
+            rst = graph.ndata['h']
+            rst = torch.matmul(rst, weight) + bias
+            return self.linear(rst)
 
 class GCN(nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -234,8 +237,8 @@ class GCN(nn.Module):
         self.layer2 = GCNLayer(4, output_dim)
 
     def forward(self, g, observations):
-        x = F.relu(self.layer1(g, observations))
-        x = F.relu(self.layer2(g, x))
+        x = torch.tanh(self.layer1(g, observations))
+        x = self.layer2(g, x)
         return x
 
 class DiagGaussianDistribution():
@@ -262,7 +265,6 @@ class DiagGaussianDistribution():
         :return:
         """
         mean_actions = nn.Linear(latent_dim, self.action_dim)
-        # TODO: allow action dependent std
         log_std = nn.Parameter(torch.ones(self.action_dim) * log_std_init, requires_grad=True)
         return mean_actions, log_std
 
@@ -347,14 +349,16 @@ class GNN_ActorCriticPolicy(nn.Module):
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 1, 2, 3, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3])
-        dst_ids = torch.tensor([0, 1, 2, 3, 1, 2, 3, 0, 2, 0, 1, 3, 0, 2])
+        src_ids = torch.tensor([0, 0, 0, 1, 1, 2])
+        dst_ids = torch.tensor([1, 2, 3, 2, 3, 3])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
+        self.etype = torch.tensor([0, 1, 2, 3, 4, 5]).to(device)
+        # self.etype = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0]).to(device)
         self.log_std_init = log_std_init
 
-        # GNN actor network: 4 * 2 ---> 4, 4 + 4 = 8, 8 * 64 * 64 * 2 
+        # GNN actor network: 4 * 2 ---> 2, 2 + 4 = 5, 6 * 64 * 64 * 2 
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
-        self.gnn = GCN(node_input_dim, node_output_dim)
+        self.gnn = RelGraphConv(node_input_dim, node_output_dim, 9)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
         self.actor_latent_layer = nn.Linear(8, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
@@ -367,14 +371,15 @@ class GNN_ActorCriticPolicy(nn.Module):
 
     def forward(self, obs, t_1_info, t_2_info, mode='sample'):
         # actor network
-        actor_latent = self.batch_gnn_process(obs, t_1_info, t_2_info)
-        latent_pi = torch.tanh(self.actor_latent_layer(actor_latent))
+        features = self.batch_gnn_process(obs, t_1_info, t_2_info)
+
+        latent_pi = torch.tanh(self.actor_latent_layer(features))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
 
         # critic network
-        latent_vf = torch.tanh(self.critic_latent_layer(obs))
+        latent_vf = torch.tanh(self.critic_latent_layer(features))
         values = self.value_net(latent_vf)
 
         return actions, values, log_probs
@@ -392,23 +397,27 @@ class GNN_ActorCriticPolicy(nn.Module):
         elif mode =='deterministic':
             return distribution.mean()
 
-    def predict_values(self, obs):
-        latent_vf = torch.tanh(self.critic_latent_layer(obs))
+    def predict_values(self, obs, t_1_info, t_2_info):
+        if obs.dim() == 2:
+            features = self.batch_gnn_process(obs, t_1_info, t_2_info)
+        else:
+            features = self.gnn_process(obs, t_1_info, t_2_info)
+        latent_vf = torch.tanh(self.critic_latent_layer(features))
         values = self.value_net(latent_vf)
 
         return values
 
     def evaluate_actions(self, obs, actions, t_1_info, t_2_info):
         if obs.dim() == 2:
-            actor_latent = self.batch_gnn_process(obs, t_1_info, t_2_info)
+            features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
-            actor_latent = self.single_gnn_process(obs, t_1_info, t_2_info)
+            features = self.gnn_process(obs, t_1_info, t_2_info)
 
-        latent_vf = torch.tanh(self.critic_latent_layer(obs))
-        latent_pi = torch.tanh(self.actor_latent_layer(actor_latent))
-
+        latent_pi = torch.tanh(self.actor_latent_layer(features))
         distribution = self._get_action_dist_from_latent(latent_pi)
         log_prob = distribution.log_prob(actions)
+
+        latent_vf = torch.tanh(self.critic_latent_layer(features))
         values = self.value_net(latent_vf)
         return values, log_prob, distribution.entropy()
 
@@ -429,20 +438,16 @@ class GNN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def batch_gnn_process(self, obs, t_1_info, t_2_info):
-        # TODO, need to check if it's correct
-        # generate node info, 4 * 2
-        nodes_info = torch.cat((obs[:, 6:], t_1_info, t_2_info, obs[:, 0: 2])).view(-1, 4, 2)
-        # after gnn process obtain 4 * 1
-        features = self.gnn(self.g, torch.transpose(nodes_info, 0, 1))
-        # batch * nodes_num, 6 * 4
-        features = torch.transpose(features, 0, 1).squeeze()
-        # 6 * 8 = 6 * 4 + 6 * 4
-        features = torch.cat((features, obs[:, 2: 6]), dim=1)
+    def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
+        features = []
+        for obs, t_1_info, t_2_info in zip(obss, t_1_infos, t_2_infos):
+            features.append(self.gnn_process(obs, t_1_info, t_2_info))
+        features = torch.stack(features)
         return features     
 
-    def single_gnn_process(self, obs, t_1_info, t_2_info):
+    def gnn_process(self, obs, t_1_info, t_2_info):
         nodes_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        features = self.gnn(self.g, nodes_info).squeeze()
-        features = torch.cat((features, obs[2: 6]))
+        graph_output = torch.relu(self.gnn(self.g, nodes_info, self.etype).squeeze())
+        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
+        features = torch.cat((graph_output, obs[2: 6]))
         return features     

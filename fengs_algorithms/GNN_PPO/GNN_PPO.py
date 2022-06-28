@@ -21,7 +21,6 @@ class GNN_PPO():
         clip_range: float = 0.2,
         ent_coef: float= 0.0,
         ac_lr: float = 3e-4,
-        gnn_lr: float = 0.001,
         vf_coef: float = 0.5,
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
@@ -43,7 +42,6 @@ class GNN_PPO():
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.ac_lr = ac_lr
-        self.gnn_lr = gnn_lr
         self.vf_coef = vf_coef
         self.gae_lambda = gae_lambda
         self.experiment_name = experiment_name
@@ -73,7 +71,11 @@ class GNN_PPO():
         self.logger = logger(experiment_name, self.time)
         self.num_timesteps = 0
         self._n_updates = 0 
-        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
+        
+        self.policy_optim = Adam([
+                                {'params': self.policy.gnn.parameters(), 'lr': 1e-3},
+                                ], lr=3e-4, eps=1e-5)
+        self.policy_optim = Adam([self.policy.parameters()], lr=self.ac_lr, eps=1e-5)
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
@@ -131,7 +133,7 @@ class GNN_PPO():
                             and infos[idx].get("TimeLimit.truncated", False)):
                         terminal_obs = obs_as_tensor(infos[idx]["terminal_observation"], self.device)
                         with torch.no_grad():
-                            terminal_value = self.policy.predict_values(terminal_obs)
+                            terminal_value = self.policy.predict_values(terminal_obs, temp_1[idx], temp_2[idx])
                         rewards[idx] += self.gamma * terminal_value
 
             self.rollout_buffer.add(
@@ -147,7 +149,7 @@ class GNN_PPO():
 
         with torch.no_grad():
             # Compute values for the last timestep, for handle truncation
-            values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))
+            values = self.policy.predict_values(obs_as_tensor(new_obs, self.device), temp_1, temp_2)
 
         # for compute the returns and advantages for whole buffer
         # we need to konw the values of last step of the buffer and the corresponding done condition
@@ -169,7 +171,8 @@ class GNN_PPO():
         return True
     
     def train(self):
-        for _ in range(self.n_epochs):
+        for i in range(self.n_epochs):
+            print(i)
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
