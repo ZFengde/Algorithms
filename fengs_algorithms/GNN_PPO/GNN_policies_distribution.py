@@ -294,47 +294,54 @@ class DiagGaussianDistribution():
         return self.sample()
 
 class GNN_Layer(nn.Module):
-    def __init__(self,
-                 in_feat,
-                 out_feat,
-                 graph,
-):      
-        self.g = graph
+    def __init__(
+                self,
+                in_feat,
+                out_feat,
+                graph,
+                self_loop_coef = 0.9,
+            ):      
         super(GNN_Layer, self).__init__()
-        self.W = nn.Parameter(torch.Tensor(graph.num_edges(), in_feat))
+        self.g = graph
+        self.in_feat = in_feat
+        self.self_loop_coef = self_loop_coef
+        self.loop_weight = nn.Linear(in_feat, in_feat)
+
+        self.W = nn.Parameter(torch.Tensor(graph.num_edges(), in_feat, out_feat))
         nn.init.normal_(self.W)
-        self.loop_weight = nn.Parameter(torch.Tensor(graph.num_nodes(), in_feat))
-        self.linear = nn.Linear(in_feat, out_feat)
+        self.h_bias = nn.Parameter(torch.Tensor(out_feat))
+        nn.init.zeros_(self.h_bias)
 
     def message(self, edges):
+        if edges.src['h'].dim() == 2:
+            x = edges.src['h'].view(-1, 1, self.in_feat)
+            m = torch.bmm(x, self.W)
         if edges.src['h'].dim() == 3:
-            W = self.W.view(-1, 1, self.W.shape[1])
-        elif edges.src['h'].dim() == 2:
-            W = self.W
-        m = edges.src['h'] * W
+            m = torch.bmm(edges.src['h'], self.W)
         return {'m' : m}
 
     def forward(self, feat):
-
         with self.g.local_scope():
             self.g.srcdata['h'] = feat
             self.g.update_all(self.message, fn.sum('m', 'h'))
-            h = self.g.dstdata['h']
-            return self.linear(h)
+            # TODO, add self loop here
+            h = self.g.dstdata['h'] + self.h_bias
+            return h.squeeze()
 
 class GNN(nn.Module):
-    def __init__(self,
-                 in_feat,
-                 out_feat,
-                 graph,
-                ):
+    def __init__(
+                self,
+                in_feat,
+                out_feat,
+                graph,
+            ):
         super(GNN, self).__init__()
         self.layer1 = GNN_Layer(in_feat, 8, graph)
         self.layer2 = GNN_Layer(8, out_feat, graph)
 
     def forward(self, features):
-        x = torch.relu(self.layer1(features))
-        x = self.layer2(x).squeeze()
+        x = torch.tanh(self.layer1(features))
+        x = self.layer2(x)
         return x
 
 class GNN_ActorCriticPolicy(nn.Module):
@@ -348,8 +355,8 @@ class GNN_ActorCriticPolicy(nn.Module):
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 1, 2, 3, 0, 0, 0, 1, 1, 2])
-        dst_ids = torch.tensor([0, 1, 2, 3, 1, 2, 3, 2, 3, 3])
+        src_ids = torch.tensor([0, 0, 0, 1, 2])
+        dst_ids = torch.tensor([1, 2, 3, 2, 3])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
@@ -357,25 +364,26 @@ class GNN_ActorCriticPolicy(nn.Module):
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
         self.gnn = GNN(node_input_dim, node_output_dim, self.g)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
-        self.actor_latent_layer = nn.Linear(8, 64)
+        self.common_layer = nn.Linear(8, 64)
+        self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=64, log_std_init=self.log_std_init)
         # critic network, directly input obs, 8 * 64 * 64 * 1
-        self.critic_latent_layer = nn.Linear(8, 64)
+        self.critic_latent_layer = nn.Linear(64, 64)
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, t_1_info, t_2_info, mode='sample'):
         # actor network
         features = self.batch_gnn_process(obs, t_1_info, t_2_info)
-
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
 
         # critic network
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return actions, values, log_probs
@@ -398,7 +406,8 @@ class GNN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return values
@@ -408,12 +417,12 @@ class GNN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distribution = self._get_action_dist_from_latent(latent_pi)
         log_prob = distribution.log_prob(actions)
 
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
         return values, log_prob, distribution.entropy()
 
@@ -426,11 +435,6 @@ class GNN_ActorCriticPolicy(nn.Module):
         return actions
 
     def reset_noise(self, n_envs: int = 1) -> None:
-        """
-        Sample new weights for the exploration matrix.
-
-        :param n_envs:
-        """
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
@@ -440,15 +444,13 @@ class GNN_ActorCriticPolicy(nn.Module):
         # ---> (4, 6, 2)
         nodes_info = torch.transpose(nodes_info, 0, 1)
         # ---> (4, 6, 1)
-        graph_output = torch.tanh(self.gnn(nodes_info).squeeze())
-        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
+        graph_output = torch.tanh(self.gnn(nodes_info).squeeze()).T
         # ---> (6, 8)
-        features = torch.cat((graph_output.T, obs[:, 2: 6]), dim=1)
+        features = torch.cat((graph_output, obs[:, 2: 6]), dim=1)
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
         nodes_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.tanh(self.gnn(nodes_info))
-        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
+        graph_output = torch.relu(self.gnn(nodes_info))
         features = torch.cat((graph_output, obs[2: 6]))
         return features     

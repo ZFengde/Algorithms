@@ -3,7 +3,7 @@ import dgl.function as fn
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
-from dgl.nn.pytorch import GraphConv
+from dgl.nn.pytorch import RelGraphConv
 
 class StateDependentNoiseDistribution():
     """
@@ -335,12 +335,13 @@ class GCN_ActorCriticPolicy(nn.Module):
         self.device = device
         src_ids = torch.tensor([0, 0, 0, 1, 1, 2])
         dst_ids = torch.tensor([1, 2, 3, 2, 3, 3])
+        self.etype = torch.tensor([0, 1, 2, 3, 4, 5]).to(device)
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
         # GNN actor network: 4 * 2 ---> 2, 2 + 4 = 5, 6 * 64 * 64 * 2 
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
-        self.gnn = GCN(node_input_dim, node_output_dim)
+        self.gnn = RelGraphConv(node_input_dim, node_output_dim, 6)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
         self.actor_latent_layer = nn.Linear(8, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
@@ -354,7 +355,6 @@ class GCN_ActorCriticPolicy(nn.Module):
     def forward(self, obs, t_1_info, t_2_info, mode='sample'):
         # actor network
         features = self.batch_gnn_process(obs, t_1_info, t_2_info)
-
         latent_pi = torch.tanh(self.actor_latent_layer(features))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
@@ -419,21 +419,19 @@ class GCN_ActorCriticPolicy(nn.Module):
         """
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
-
   
-
-    def batch_gnn_process(self, obs, t_1_info, t_2_info):
-        # batch * num_node * features = 6 * 4 * 2
-        nodes_info = torch.cat((obs[:,6:], t_1_info, t_2_info, obs[:, 0: 2])).view(-1, 4, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        graph_output = torch.relu(self.gnn(self.g, nodes_info).squeeze())
-        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
-        features = torch.cat((graph_output.T, obs[:, 2: 6]), dim=1)
-        return features     
+    def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
+        features = []
+        # TODO, here could be the place slow down the training
+        # seems ten times slow down the training
+        for obs, t_1_info, t_2_info in zip(obss, t_1_infos, t_2_infos):
+            features.append(self.gnn_process(obs, t_1_info, t_2_info))
+        features = torch.stack(features)  
+        return features
 
     def gnn_process(self, obs, t_1_info, t_2_info):
         nodes_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.relu(self.gnn(self.g, nodes_info).squeeze())
+        graph_output = torch.relu(self.gnn(self.g, nodes_info, self.etype).squeeze())
         # graph_latent = torch.tanh(self.feat_extrac(graph_output))
         features = torch.cat((graph_output, obs[2: 6]))
         return features     

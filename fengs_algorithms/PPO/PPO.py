@@ -64,7 +64,7 @@ class PPO():
         )
 
         self.policy = policy(
-            feature_dim=self.env.observation_space.shape[0], 
+            input_dim=self.env.observation_space.shape[0], 
             actor_output_dim=2,).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
@@ -118,12 +118,14 @@ class PPO():
                     if infos[idx].get('Success') == 'Yes':
                         ep_num_success += 1
                     if (infos[idx].get("terminal_observation") is not None 
-                            # this means if "TimeLimit.truncated" doesn't have value, then output False
-                            # only when time out of timelimit, continue
                             and infos[idx].get("TimeLimit.truncated", False)):
-                        # the reason why don't directly use last obs is that in _worker of 
-                        # parallel vectorized env, if done,... = step(aciton), what return is obs = reset()
-                        # and the real last obs is store at (infos[idx]["terminal_observation"])
+                        '''
+                        this means if "TimeLimit.truncated" doesn't have value, then output False
+                        only when time out of timelimit, continue
+                        the reason why don't directly use last obs is that in _worker of 
+                        parallel vectorized env, if done,... = step(aciton), what return is obs = reset()
+                        and the real last obs is store at (infos[idx]["terminal_observation"])
+                        '''
                         terminal_obs = obs_as_tensor(infos[idx]["terminal_observation"], self.device)
                         with torch.no_grad():
                             terminal_value = self.policy.predict_values(terminal_obs)

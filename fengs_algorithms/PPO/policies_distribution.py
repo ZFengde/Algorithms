@@ -294,13 +294,13 @@ class DiagGaussianDistribution():
 class ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
-        feature_dim : int, 
+        input_dim : int, 
         actor_output_dim : int, 
         log_std_init = 0.0 # according to the StateDependentNoiseDistribution class from baseline3
     ):
         super(ActorCriticPolicy, self).__init__()
         
-        self.common_layer = nn.Linear(feature_dim, 64)
+        self.common_layer = nn.Linear(input_dim, 64)
         self.actor_latent_layer = nn.Linear(64, 64)
         self.critic_latent_layer = nn.Linear(64, 64)
 
