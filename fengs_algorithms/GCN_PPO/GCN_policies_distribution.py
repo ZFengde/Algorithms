@@ -1,5 +1,5 @@
 import dgl
-import dgl.function.message as fn
+import dgl.function as fn
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
@@ -200,44 +200,28 @@ class StateDependentNoiseDistribution():
 class GCNLayer(nn.Module):
     def __init__(self, in_feats, out_feats):
         super(GCNLayer, self).__init__()
-        # linear process in GCN is linear transformation from in_feats to out_feats
-        # TODO, need to add weight matrix here
-        self.gcn_msg = fn.u_mul_e('h', '_edge_weight', 'm')
-        self.gcn_reduce = fn.mean(msg='m', out='h')
-
         self.linear = nn.Linear(in_feats, out_feats)
 
-    def forward(self, graph, feat, weight, edge_weight, bias):
+    def forward(self, g, feature):
         # Creating a local scope so that all the stored ndata and edata
         # (such as the `'h'` ndata below) are automatically popped out
         # when the scope exits.
-        with graph.local_scope():
-            graph.edata['_edge_weight'] = edge_weight
-            graph.ndata['h'] = feat
-            # message, aggregation
-            graph.update_all(self.gcn_msg, self.gcn_reduce)
-            rst = graph.ndata['h']
-            rst = torch.matmul(rst, weight) + bias
-            return self.linear(rst)
+        gcn_msg = fn.copy_u(u='h', out='m')
+        gcn_reduce = fn.sum(msg='m', out='h')
+        with g.local_scope():
+            g.ndata['h'] = feature
+            g.update_all(gcn_msg, gcn_reduce)
+            h = g.ndata['h']
+            return self.linear(h)
 
 class GCN(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(GCN, self).__init__()
-        '''
-        here is the feature sizes, so for each GCN layer
-        we implement once forward operation as above, 
-        i.e., take as input observation node feature
-        then, operations like below:
-        doubld operations:
-        input feature message (copy) -- aggregation (sum) -- update (linear) 
-        2 --> 8
-        8 --> 1
-        '''
-        self.layer1 = GCNLayer(input_dim, 4)
-        self.layer2 = GCNLayer(4, output_dim)
+        self.layer1 = GCNLayer(input_dim, 16)
+        self.layer2 = GCNLayer(16, output_dim)
 
-    def forward(self, g, observations):
-        x = torch.tanh(self.layer1(g, observations))
+    def forward(self, g, features):
+        x = torch.relu(self.layer1(g, features))
         x = self.layer2(g, x)
         return x
 
@@ -356,7 +340,7 @@ class GCN_ActorCriticPolicy(nn.Module):
 
         # GNN actor network: 4 * 2 ---> 2, 2 + 4 = 5, 6 * 64 * 64 * 2 
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
-        self.gnn = GraphConv(node_input_dim, node_output_dim)
+        self.gnn = GCN(node_input_dim, node_output_dim)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
         self.actor_latent_layer = nn.Linear(8, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
@@ -436,11 +420,15 @@ class GCN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
-        features = []
-        for obs, t_1_info, t_2_info in zip(obss, t_1_infos, t_2_infos):
-            features.append(self.gnn_process(obs, t_1_info, t_2_info))
-        features = torch.stack(features)
+  
+
+    def batch_gnn_process(self, obs, t_1_info, t_2_info):
+        # batch * num_node * features = 6 * 4 * 2
+        nodes_info = torch.cat((obs[:,6:], t_1_info, t_2_info, obs[:, 0: 2])).view(-1, 4, 2)
+        nodes_info = torch.transpose(nodes_info, 0, 1)
+        graph_output = torch.relu(self.gnn(self.g, nodes_info).squeeze())
+        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
+        features = torch.cat((graph_output.T, obs[:, 2: 6]), dim=1)
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):

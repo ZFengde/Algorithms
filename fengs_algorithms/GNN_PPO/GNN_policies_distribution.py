@@ -1,9 +1,8 @@
 import dgl
-import dgl.function.message as fn
+import dgl.function as fn
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
-from dgl.nn.pytorch import RelGraphConv
 
 class StateDependentNoiseDistribution():
     """
@@ -197,50 +196,6 @@ class StateDependentNoiseDistribution():
             return self.mode()
         return self.sample()
 
-class GCNLayer(nn.Module):
-    def __init__(self, in_feats, out_feats):
-        super(GCNLayer, self).__init__()
-        # linear process in GCN is linear transformation from in_feats to out_feats
-        # TODO, need to add weight matrix here
-        self.gcn_msg = fn.u_mul_e('h', '_edge_weight', 'm')
-        self.gcn_reduce = fn.mean(msg='m', out='h')
-
-        self.linear = nn.Linear(in_feats, out_feats)
-
-    def forward(self, graph, feat, weight, edge_weight, bias):
-        # Creating a local scope so that all the stored ndata and edata
-        # (such as the `'h'` ndata below) are automatically popped out
-        # when the scope exits.
-        with graph.local_scope():
-            graph.edata['_edge_weight'] = edge_weight
-            graph.ndata['h'] = feat
-            # message, aggregation
-            graph.update_all(self.gcn_msg, self.gcn_reduce)
-            rst = graph.ndata['h']
-            rst = torch.matmul(rst, weight) + bias
-            return self.linear(rst)
-
-class GCN(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(GCN, self).__init__()
-        '''
-        here is the feature sizes, so for each GCN layer
-        we implement once forward operation as above, 
-        i.e., take as input observation node feature
-        then, operations like below:
-        doubld operations:
-        input feature message (copy) -- aggregation (sum) -- update (linear) 
-        2 --> 8
-        8 --> 1
-        '''
-        self.layer1 = GCNLayer(input_dim, 4)
-        self.layer2 = GCNLayer(4, output_dim)
-
-    def forward(self, g, observations):
-        x = torch.tanh(self.layer1(g, observations))
-        x = self.layer2(g, x)
-        return x
-
 class DiagGaussianDistribution():
     """
     Gaussian distribution with diagonal covariance matrix, for continuous actions.
@@ -338,6 +293,50 @@ class DiagGaussianDistribution():
             return self.mode()
         return self.sample()
 
+class GNN_Layer(nn.Module):
+    def __init__(self,
+                 in_feat,
+                 out_feat,
+                 graph,
+):      
+        self.g = graph
+        super(GNN_Layer, self).__init__()
+        self.W = nn.Parameter(torch.Tensor(graph.num_edges(), in_feat))
+        nn.init.normal_(self.W)
+        self.loop_weight = nn.Parameter(torch.Tensor(graph.num_nodes(), in_feat))
+        self.linear = nn.Linear(in_feat, out_feat)
+
+    def message(self, edges):
+        if edges.src['h'].dim() == 3:
+            W = self.W.view(-1, 1, self.W.shape[1])
+        elif edges.src['h'].dim() == 2:
+            W = self.W
+        m = edges.src['h'] * W
+        return {'m' : m}
+
+    def forward(self, feat):
+
+        with self.g.local_scope():
+            self.g.srcdata['h'] = feat
+            self.g.update_all(self.message, fn.sum('m', 'h'))
+            h = self.g.dstdata['h']
+            return self.linear(h)
+
+class GNN(nn.Module):
+    def __init__(self,
+                 in_feat,
+                 out_feat,
+                 graph,
+                ):
+        super(GNN, self).__init__()
+        self.layer1 = GNN_Layer(in_feat, 8, graph)
+        self.layer2 = GNN_Layer(8, out_feat, graph)
+
+    def forward(self, features):
+        x = torch.relu(self.layer1(features))
+        x = self.layer2(x).squeeze()
+        return x
+
 class GNN_ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
@@ -349,22 +348,19 @@ class GNN_ActorCriticPolicy(nn.Module):
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 0, 0, 1, 1, 2])
-        dst_ids = torch.tensor([1, 2, 3, 2, 3, 3])
+        src_ids = torch.tensor([0, 1, 2, 3, 0, 0, 0, 1, 1, 2])
+        dst_ids = torch.tensor([0, 1, 2, 3, 1, 2, 3, 2, 3, 3])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
-        self.etype = torch.tensor([0, 1, 2, 3, 4, 5]).to(device)
-        # self.etype = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0]).to(device)
         self.log_std_init = log_std_init
 
         # GNN actor network: 4 * 2 ---> 2, 2 + 4 = 5, 6 * 64 * 64 * 2 
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
-        self.gnn = RelGraphConv(node_input_dim, node_output_dim, 9)
+        self.gnn = GNN(node_input_dim, node_output_dim, self.g)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
         self.actor_latent_layer = nn.Linear(8, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
-                latent_dim=64, log_std_init=self.log_std_init
-            )
+                latent_dim=64, log_std_init=self.log_std_init)
         # critic network, directly input obs, 8 * 64 * 64 * 1
         self.critic_latent_layer = nn.Linear(8, 64)
         self.value_net = nn.Linear(64, 1)
@@ -438,16 +434,21 @@ class GNN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
-        features = []
-        for obs, t_1_info, t_2_info in zip(obss, t_1_infos, t_2_infos):
-            features.append(self.gnn_process(obs, t_1_info, t_2_info))
-        features = torch.stack(features)
+    def batch_gnn_process(self, obs, t_1_info, t_2_info):
+        # batch * num_node * features = (6, 4, 2)
+        nodes_info = torch.cat((obs[:,6:], t_1_info, t_2_info, obs[:, 0: 2])).view(-1, 4, 2)
+        # ---> (4, 6, 2)
+        nodes_info = torch.transpose(nodes_info, 0, 1)
+        # ---> (4, 6, 1)
+        graph_output = torch.tanh(self.gnn(nodes_info).squeeze())
+        # graph_latent = torch.tanh(self.feat_extrac(graph_output))
+        # ---> (6, 8)
+        features = torch.cat((graph_output.T, obs[:, 2: 6]), dim=1)
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
         nodes_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.relu(self.gnn(self.g, nodes_info, self.etype).squeeze())
+        graph_output = torch.tanh(self.gnn(nodes_info))
         # graph_latent = torch.tanh(self.feat_extrac(graph_output))
         features = torch.cat((graph_output, obs[2: 6]))
         return features     

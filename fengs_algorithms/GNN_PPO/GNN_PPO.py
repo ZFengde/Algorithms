@@ -72,10 +72,10 @@ class GNN_PPO():
         self.num_timesteps = 0
         self._n_updates = 0 
         
-        self.policy_optim = Adam([
-                                {'params': self.policy.gnn.parameters(), 'lr': 1e-3},
-                                ], lr=3e-4, eps=1e-5)
-        self.policy_optim = Adam([self.policy.parameters()], lr=self.ac_lr, eps=1e-5)
+        # self.policy_optim = Adam([
+        #                         {'params': self.policy.gnn.parameters(), 'lr': 1e-3},
+        #                         ], lr=3e-4, eps=1e-5)
+        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
@@ -172,7 +172,6 @@ class GNN_PPO():
     
     def train(self):
         for i in range(self.n_epochs):
-            print(i)
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
