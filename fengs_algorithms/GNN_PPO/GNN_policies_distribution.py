@@ -3,6 +3,7 @@ import dgl.function as fn
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+import math
 
 class StateDependentNoiseDistribution():
     """
@@ -306,32 +307,36 @@ class GNN_Layer(nn.Module):
         
         self.loop_weight =nn.Parameter(torch.Tensor(graph.num_nodes(), in_feat, out_feat))
         self.W = nn.Parameter(torch.Tensor(graph.num_edges(), in_feat, out_feat))
+        self.m_bias = nn.Parameter(torch.Tensor(graph.num_edges(), 1, out_feat))
         self.h_bias = nn.Parameter(torch.Tensor(graph.num_nodes(), 1, out_feat))
         self._reset_parameters()
 
     def _reset_parameters(self):
-        nn.init.normal_(self.loop_weight)
-        nn.init.normal_(self.W)
+        nn.init.xavier_uniform_(self.loop_weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.uniform_(self.W, -1/math.sqrt(self.in_feat), 1/math.sqrt(self.in_feat))
+        nn.init.zeros_(self.m_bias)
         nn.init.zeros_(self.h_bias)
 
     def message(self, edges):
         # W: num_edges, in_feat, out_feat
-        # edges.src['h']: num_edges, batch/no batch, in_feat
+        # edges.src['h']: num_edges, batch/1(no batch), in_feat
         if edges.src['h'].dim() == 2:
             x = edges.src['h'].view(-1, 1, self.in_feat)
-            m = torch.bmm(x, self.W)
+            message = torch.bmm(x, self.W) + self.m_bias
         elif edges.src['h'].dim() == 3:
-            m = torch.bmm(edges.src['h'], self.W)
-        return {'m' : m}
+            message = torch.bmm(edges.src['h'], self.W) + self.m_bias
+        return {'m' : message}
 
     def forward(self, feat):
         with self.g.local_scope():
             self.g.srcdata['h'] = feat
+
+            # self-loop
             if self.g.srcdata['h'].dim() == 2:
                 x = self.g.srcdata['h'].view(-1, 1, self.in_feat)
                 loop = torch.bmm(x,  self.loop_weight)
             elif self.g.srcdata['h'].dim() == 3:
-                loop = torch.bmm(self.g.srcdata['h'],  self.loop_weight)
+                loop = torch.bmm(self.g.srcdata['h'], self.loop_weight)
             self.g.update_all(self.message, fn.sum('m', 'h'))
             h = self.g.dstdata['h'] + self.h_bias + loop
             return h.squeeze()
@@ -344,11 +349,11 @@ class GNN(nn.Module):
                 graph,
             ):
         super(GNN, self).__init__()
-        self.layer1 = GNN_Layer(in_feat, 8, graph)
-        self.layer2 = GNN_Layer(8, out_feat, graph)
+        self.layer1 = GNN_Layer(in_feat, 4, graph)
+        self.layer2 = GNN_Layer(4, out_feat, graph)
 
     def forward(self, features):
-        x = torch.relu(self.layer1(features))
+        x = torch.tanh(self.layer1(features))
         x = self.layer2(x)
         return x
 
@@ -368,10 +373,8 @@ class GNN_ActorCriticPolicy(nn.Module):
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
-        # GNN actor network: 4 * 2 ---> 2, 2 + 4 = 5, 6 * 64 * 64 * 2 
-        # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
         self.gnn = GNN(node_input_dim, node_output_dim, self.g)
-        # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
+        # self.feature_extractor = nn.Linear(4, 4)
         self.common_layer = nn.Linear(8, 64)
         self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
@@ -445,19 +448,19 @@ class GNN_ActorCriticPolicy(nn.Module):
         assert isinstance(self.action_dist, StateDependentNoiseDistribution), "reset_noise() is only available when using gSDE"
         self.action_dist.sample_weights(self.log_std, batch_size=n_envs)
 
-    def batch_gnn_process(self, obs, t_1_info, t_2_info):
-        # batch * num_node * features = (6, 4, 2)
-        nodes_info = torch.cat((obs[:,6:], t_1_info, t_2_info, obs[:, 0: 2])).view(-1, 4, 2)
-        # ---> (4, 6, 2)
-        nodes_info = torch.transpose(nodes_info, 0, 1)
-        # ---> (4, 6, 1)
-        graph_output = torch.tanh(self.gnn(nodes_info).squeeze()).T
-        # ---> (6, 8)
-        features = torch.cat((graph_output, obs[:, 2: 6]), dim=1)
+    def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
+        nodes_info = torch.stack((obss[:,6:], t_1_infos, t_2_infos, obss[:, 0: 2]),dim=1) # 6, 4, 2
+        nodes_info = torch.transpose(nodes_info, 0, 1) # 4, 6, 2, nodes, batch, info
+
+        graph_output = torch.tanh(self.gnn(nodes_info)).T # 6, 4
+        # graph_latent = torch.tanh(self.feature_extractor(graph_output))
+        features = torch.cat((graph_output, obss[:, 2: 6]), dim=1) # 6, 8
+        
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
-        nodes_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.relu(self.gnn(nodes_info))
+        node_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
+        graph_output = torch.relu(self.gnn(node_info))
+        # graph_latent = torch.tanh(self.feature_extractor(graph_output))
         features = torch.cat((graph_output, obs[2: 6]))
         return features     

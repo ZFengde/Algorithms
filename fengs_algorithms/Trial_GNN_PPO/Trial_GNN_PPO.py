@@ -5,15 +5,15 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from fengs_algorithms.GCN_PPO.GCN_policies_distribution import GCN_ActorCriticPolicy
+from fengs_algorithms.Trial_GNN_PPO.Trial_GNN_policies_distribution import Trial_GNN_ActorCriticPolicy
 from fengs_algorithms.common.buffer import Temp_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
-class GCN_PPO():
+class Trial_GNN_PPO():
     def __init__(
         self,
         env, 
-        policy = GCN_ActorCriticPolicy, 
+        policy = Trial_GNN_ActorCriticPolicy, 
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         n_rollout_steps: int = 2048,
@@ -172,7 +172,6 @@ class GCN_PPO():
     
     def train(self):
         for i in range(self.n_epochs):
-            print(i)
             # here generate random small batch from rollout buffer
             # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
