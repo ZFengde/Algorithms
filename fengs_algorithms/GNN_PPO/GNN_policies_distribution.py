@@ -1,3 +1,4 @@
+# this policy store the best GNN PPO policy so far
 import dgl
 import dgl.function as fn
 import torch
