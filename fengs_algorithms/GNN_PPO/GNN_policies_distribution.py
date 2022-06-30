@@ -299,33 +299,41 @@ class GNN_Layer(nn.Module):
                 in_feat,
                 out_feat,
                 graph,
-                self_loop_coef = 0.9,
             ):      
         super(GNN_Layer, self).__init__()
         self.g = graph
         self.in_feat = in_feat
-        self.self_loop_coef = self_loop_coef
-        self.loop_weight = nn.Linear(in_feat, in_feat)
-
+        
+        self.loop_weight =nn.Parameter(torch.Tensor(graph.num_nodes(), in_feat, out_feat))
         self.W = nn.Parameter(torch.Tensor(graph.num_edges(), in_feat, out_feat))
+        self.h_bias = nn.Parameter(torch.Tensor(graph.num_nodes(), 1, out_feat))
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        nn.init.normal_(self.loop_weight)
         nn.init.normal_(self.W)
-        self.h_bias = nn.Parameter(torch.Tensor(out_feat))
         nn.init.zeros_(self.h_bias)
 
     def message(self, edges):
+        # W: num_edges, in_feat, out_feat
+        # edges.src['h']: num_edges, batch/no batch, in_feat
         if edges.src['h'].dim() == 2:
             x = edges.src['h'].view(-1, 1, self.in_feat)
             m = torch.bmm(x, self.W)
-        if edges.src['h'].dim() == 3:
+        elif edges.src['h'].dim() == 3:
             m = torch.bmm(edges.src['h'], self.W)
         return {'m' : m}
 
     def forward(self, feat):
         with self.g.local_scope():
             self.g.srcdata['h'] = feat
+            if self.g.srcdata['h'].dim() == 2:
+                x = self.g.srcdata['h'].view(-1, 1, self.in_feat)
+                loop = torch.bmm(x,  self.loop_weight)
+            elif self.g.srcdata['h'].dim() == 3:
+                loop = torch.bmm(self.g.srcdata['h'],  self.loop_weight)
             self.g.update_all(self.message, fn.sum('m', 'h'))
-            # TODO, add self loop here
-            h = self.g.dstdata['h'] + self.h_bias
+            h = self.g.dstdata['h'] + self.h_bias + loop
             return h.squeeze()
 
 class GNN(nn.Module):
@@ -340,7 +348,7 @@ class GNN(nn.Module):
         self.layer2 = GNN_Layer(8, out_feat, graph)
 
     def forward(self, features):
-        x = torch.tanh(self.layer1(features))
+        x = torch.relu(self.layer1(features))
         x = self.layer2(x)
         return x
 
@@ -355,8 +363,8 @@ class GNN_ActorCriticPolicy(nn.Module):
     ):
         super(GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 0, 0, 1, 2])
-        dst_ids = torch.tensor([1, 2, 3, 2, 3])
+        src_ids = torch.tensor([0, 0, 0, 1, 1, 2])
+        dst_ids = torch.tensor([1, 2, 3, 2, 3, 3])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
@@ -369,7 +377,6 @@ class GNN_ActorCriticPolicy(nn.Module):
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=64, log_std_init=self.log_std_init)
-        # critic network, directly input obs, 8 * 64 * 64 * 1
         self.critic_latent_layer = nn.Linear(64, 64)
         self.value_net = nn.Linear(64, 1)
 

@@ -343,25 +343,27 @@ class GCN_ActorCriticPolicy(nn.Module):
         # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
         self.gnn = RelGraphConv(node_input_dim, node_output_dim, 6)
         # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
-        self.actor_latent_layer = nn.Linear(8, 64)
+        self.common_layer = nn.Linear(8, 64)
+        self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=64, log_std_init=self.log_std_init
             )
         # critic network, directly input obs, 8 * 64 * 64 * 1
-        self.critic_latent_layer = nn.Linear(8, 64)
+        self.critic_latent_layer = nn.Linear(64, 64)
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, t_1_info, t_2_info, mode='sample'):
         # actor network
         features = self.batch_gnn_process(obs, t_1_info, t_2_info)
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
 
         # critic network
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return actions, values, log_probs
@@ -384,7 +386,8 @@ class GCN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return values
@@ -394,12 +397,12 @@ class GCN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distribution = self._get_action_dist_from_latent(latent_pi)
         log_prob = distribution.log_prob(actions)
 
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
         return values, log_prob, distribution.entropy()
 

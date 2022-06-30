@@ -9,7 +9,7 @@ from fengs_algorithms.GCN_PPO.GCN_policies_distribution import GCN_ActorCriticPo
 from fengs_algorithms.common.buffer import Temp_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
-class GNN_PPO():
+class GCN_PPO():
     def __init__(
         self,
         env, 
