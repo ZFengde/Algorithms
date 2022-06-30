@@ -24,10 +24,10 @@ class Trial_GNN_PPO():
         vf_coef: float = 0.5,
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
-        experiment_name = 'GCN_PPO',
+        experiment_name = 'Trial_GNN_PPO',
         buffer_cls = Temp_RolloutBuffer,
         logger = Logger,
-        save_model_name = 'GCN_PPO',
+        save_model_name = 'Trial_GNN_PPO',
         parallel = True
     ):
 
