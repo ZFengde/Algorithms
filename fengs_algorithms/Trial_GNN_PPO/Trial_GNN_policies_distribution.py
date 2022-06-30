@@ -1,3 +1,6 @@
+# no common layer
+# no feature extractor
+
 import dgl
 import dgl.function as fn
 import torch
