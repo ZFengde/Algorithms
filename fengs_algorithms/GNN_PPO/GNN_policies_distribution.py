@@ -182,10 +182,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
-        # 4 * 2 ---> 4 * 1, 4 nodes, includng one target and three temporal node position
         self.gnn = GNN(node_input_dim, node_output_dim, self.g)
-        # process information by 4 + 4, 4 from gnn output and 4 from ori and vel
-        self.feature_extractor = nn.Linear(4, 4)
         self.common_layer = nn.Linear(8, 64)
         self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
@@ -255,16 +252,13 @@ class GNN_ActorCriticPolicy(nn.Module):
     def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
         nodes_info = torch.stack((obss[:,6:], t_1_infos, t_2_infos, obss[:, 0: 2]),dim=1) # 6, 4, 2
         nodes_info = torch.transpose(nodes_info, 0, 1) # 4, 6, 2, nodes, batch, info
-
-        graph_output = torch.tanh(self.gnn(nodes_info)).T # 6, 4
-        graph_latent = torch.tanh(self.feature_extractor(graph_output))
-        features = torch.cat((graph_latent, obss[:, 2: 6]), dim=1) # 6, 8
+        graph_output = torch.tanh(self.gnn(nodes_info)).T # 4, 6, 1 ---> 6, 4
+        features = torch.cat((graph_output, obss[:, 2: 6]), dim=1) # 6, 8
         
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
         node_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.relu(self.gnn(node_info))
-        graph_latent = torch.tanh(self.feature_extractor(graph_output))
-        features = torch.cat((graph_latent, obs[2: 6]))
+        graph_output = torch.tanh(self.gnn(node_info))
+        features = torch.cat((graph_output, obs[2: 6]))
         return features     

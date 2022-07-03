@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 from fengs_algorithms.Trial_GNN_PPO.Trial_GNN_policies_distribution import Trial_GNN_ActorCriticPolicy
-from fengs_algorithms.common.buffer import Temp_RolloutBuffer
+from fengs_algorithms.common.buffer import Temp_2_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
 class Trial_GNN_PPO():
@@ -25,7 +25,7 @@ class Trial_GNN_PPO():
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
         experiment_name = 'Trial_GNN_PPO',
-        buffer_cls = Temp_RolloutBuffer,
+        buffer_cls = Temp_2_RolloutBuffer,
         logger = Logger,
         save_model_name = 'Trial_GNN_PPO',
         parallel = True
@@ -63,8 +63,8 @@ class Trial_GNN_PPO():
         )
 
         self.policy = policy(
-            node_input_dim=2, 
-            node_output_dim=1, 
+            node_input_dim=6, 
+            node_output_dim=2, 
             actor_output_dim=2,
             device=self.device).to(self.device)
 
@@ -79,8 +79,9 @@ class Trial_GNN_PPO():
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
-        self.t_1_info = np.zeros((self.n_envs, 2))
-        self.t_2_info = np.zeros((self.n_envs, 2))
+        # TODO
+        self.t_1_info = np.zeros((self.n_envs, 6))
+        self.t_2_info = np.zeros((self.n_envs, 6))
         self._last_obs = None
         self._last_episode_starts = np.ones((self.n_envs,), dtype=bool)
 
@@ -117,7 +118,8 @@ class Trial_GNN_PPO():
             # if so, pass the information to the buffer
 
             self.t_2_info = self.t_1_info
-            self.t_1_info = new_obs[:, 0: 2]
+            # TODO
+            self.t_1_info = new_obs[:, 0: 6]
             
             for idx, done in enumerate(dones):
                 if done:
@@ -125,8 +127,9 @@ class Trial_GNN_PPO():
                     rollout_ep_len.append(self.episode_length_buffer[idx])
                     self.episode_length_buffer[idx] = 0
                     self.episode_reward_buffer[idx] = 0
-                    self.t_1_info[idx] = np.zeros((1, 2))
-                    self.t_2_info[idx] = np.zeros((1, 2))
+                    # TODO
+                    self.t_1_info[idx] = np.zeros((1, 6))
+                    self.t_2_info[idx] = np.zeros((1, 6))
                     if infos[idx].get('Success') == 'Yes':
                         ep_num_success += 1
                     if (infos[idx].get("terminal_observation") is not None 

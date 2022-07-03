@@ -1,6 +1,4 @@
-# no common layer
-# no feature extractor
-
+# tanh in GNN
 import dgl
 import dgl.function as fn
 import torch
@@ -160,8 +158,8 @@ class GNN(nn.Module):
                 graph,
             ):
         super(GNN, self).__init__()
-        self.layer1 = GNN_Layer(in_feat, 4, graph)
-        self.layer2 = GNN_Layer(4, out_feat, graph)
+        self.layer1 = GNN_Layer(in_feat, 8, graph)
+        self.layer2 = GNN_Layer(8, out_feat, graph)
 
     def forward(self, features):
         x = torch.tanh(self.layer1(features))
@@ -185,23 +183,25 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         self.log_std_init = log_std_init
 
         self.gnn = GNN(node_input_dim, node_output_dim, self.g)
-        self.actor_latent_layer = nn.Linear(8, 64)
+        self.common_layer = nn.Linear(8, 64)
+        self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
                 latent_dim=64, log_std_init=self.log_std_init)
-        self.critic_latent_layer = nn.Linear(8, 64)
+        self.critic_latent_layer = nn.Linear(64, 64)
         self.value_net = nn.Linear(64, 1)
 
     def forward(self, obs, t_1_info, t_2_info, mode='sample'):
         # actor network
         features = self.batch_gnn_process(obs, t_1_info, t_2_info)
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
 
         # critic network
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return actions, values, log_probs
@@ -221,7 +221,8 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
 
         return values
@@ -231,11 +232,12 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
             features = self.batch_gnn_process(obs, t_1_info, t_2_info)
         else:
             features = self.gnn_process(obs, t_1_info, t_2_info)
-        latent_pi = torch.tanh(self.actor_latent_layer(features))
+        shared_latent = torch.tanh(self.common_layer(features))
+        latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distribution = self._get_action_dist_from_latent(latent_pi)
         log_prob = distribution.log_prob(actions)
 
-        latent_vf = torch.tanh(self.critic_latent_layer(features))
+        latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
         return values, log_prob, distribution.entropy()
 
@@ -248,16 +250,26 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         return actions
 
     def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
-        nodes_info = torch.stack((obss[:,6:], t_1_infos, t_2_infos, obss[:, 0: 2]),dim=1) # 6, 4, 2
-        nodes_info = torch.transpose(nodes_info, 0, 1) # 4, 6, 2, nodes, batch, info
+        # For test
+        target_poss = obss[:,6:]
+        target_infos = torch.cat((target_poss,torch.zeros_like(target_poss),torch.zeros_like(target_poss)),dim=1)
+        nodes_infos = torch.stack((target_infos, t_1_infos, t_2_infos, obss[:, 0: 6]),dim=1) # 6, 4, 6
 
-        graph_output = torch.tanh(self.gnn(nodes_info)).T # 6, 4
-        features = torch.cat((graph_output, obss[:, 2: 6]), dim=1) # 6, 8
-        
+        nodes_infos = torch.transpose(nodes_infos, 0, 1) # 4, 6, 6, nodes, batch, info
+
+        graph_output = torch.tanh(self.gnn(nodes_infos)) # 4, 6, 2
+        # print('3:', graph_output)
+        graph_output = torch.transpose(graph_output, 0, 1) # 6, 4, 2
+        # print('4:', graph_output)
+        features = torch.flatten(graph_output, start_dim=1) # 6, 8
+        # print('5:', features)
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
-        node_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.relu(self.gnn(node_info))
-        features = torch.cat((graph_output, obs[2: 6]))
+        target_pos = obs[6:]
+        target_info = torch.cat((target_pos,torch.zeros_like(target_pos),torch.zeros_like(target_pos)))
+        node_info = torch.cat((target_info, t_1_info, t_2_info, obs[0: 6])).view(4, 6) # 4, 6
+        # print('6:', node_info)
+        features = torch.tanh(self.gnn(node_info)).flatten() # 4, 2
+        # print('7:', features)
         return features     
