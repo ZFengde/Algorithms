@@ -242,10 +242,12 @@ class GNN_ActorCriticPolicy(nn.Module):
         return values, log_prob, distribution.entropy()
 
     def predict(self, obs, t_1_info, t_2_info):
-        shared_latent = torch.tanh(self.common_layer(obs))
-
+        # actor network
+        features = self.batch_gnn_process(obs, t_1_info, t_2_info)
+        shared_latent = torch.tanh(self.common_layer(features))
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
-        actions = self.action_net(latent_pi)
+        distributions = self._get_action_dist_from_latent(latent_pi)
+        actions = self.get_actions(distributions, mode='deterministic')
 
         return actions
 

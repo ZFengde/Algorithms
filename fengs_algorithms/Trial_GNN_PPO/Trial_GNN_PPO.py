@@ -104,7 +104,6 @@ class Trial_GNN_PPO():
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
                 actions, values, log_probs = self.policy(obs_tensor, temp_1, temp_2)
             actions = actions.cpu().numpy()
-            
             clipped_actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
             new_obs, rewards, dones, infos = self.env.step(clipped_actions)
             
@@ -118,7 +117,6 @@ class Trial_GNN_PPO():
             # if so, pass the information to the buffer
 
             self.t_2_info = self.t_1_info
-            # TODO
             self.t_1_info = new_obs[:, 0: 6]
             
             for idx, done in enumerate(dones):
@@ -154,8 +152,8 @@ class Trial_GNN_PPO():
             # Compute values for the last timestep, for handle truncation
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device), temp_1, temp_2)
 
-        # for compute the returns and advantages for whole buffer
-        # we need to konw the values of last step of the buffer and the corresponding done condition
+        # for compute the re turns and advantages for whole buffer
+        # we need to konw thevalues of last step of the buffer and the corresponding done condition
         self.rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         ep_num_rollout = len(rollout_ep_rewards)
@@ -165,7 +163,7 @@ class Trial_GNN_PPO():
             self.logger.record("rollout/success_rate", success_rate)
             self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
             self.logger.record("rollout/ep_num_success", ep_num_success)
-            self.logger.record("rollout/ep_len_mean", np.mean(rollout_ep_len))
+            self.logger.to_tensorboard(name='Episode_length_mean', data=np.mean(rollout_ep_len), time_count=self.num_timesteps)
             self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
             self.logger.to_tensorboard(name='Success_rate', data=success_rate, time_count=self.num_timesteps)
             self.logger.close()
@@ -175,8 +173,6 @@ class Trial_GNN_PPO():
     
     def train(self):
         for i in range(self.n_epochs):
-            # here generate random small batch from rollout buffer
-            # and do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.sample(self.batch_size):
                 values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, 
                                                                         rollout_data.actions, 
@@ -184,30 +180,24 @@ class Trial_GNN_PPO():
                                                                         rollout_data.t_2_infos)
                 values = values.flatten()
 
-                # calculate and normalise the advantages
                 advantages = rollout_data.advantages
                 advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                 ratio = torch.exp(log_prob - rollout_data.old_log_prob)
 
-                # clipped surrogate loss
                 surr_loss_1 = advantages * ratio
                 surr_loss_2 = advantages * torch.clamp(ratio, 1 - self.clip_range, 1 + self.clip_range)
                 policy_loss = -torch.min(surr_loss_1, surr_loss_2).mean()
 
                 values_pred = values.squeeze()
-                # Value loss using the TD(gae_lambda) target 64, 16
                 value_loss = F.mse_loss(rollout_data.returns, values_pred)
-                # Entropy loss favor exploration
                 if entropy is None:
-                    # Approximate entropy when no analytical form
                     entropy_loss = -torch.mean(-log_prob)
                 else:
                     entropy_loss = -torch.mean(entropy)
 
                 accumulative_loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
-                # TODO, GNN backprobagate here
                 self.policy_optim.zero_grad()
                 accumulative_loss.backward(retain_graph=True)
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
@@ -245,31 +235,31 @@ class Trial_GNN_PPO():
         self.policy.load_state_dict(torch.load(path))
 
     def test(self, test_episode):
-
-        self.rollout_buffer.reset()
-
-        for episode_count in range(test_episode):
+        t_1_info_test = np.zeros(6)
+        t_2_info_test = np.zeros(6)
+        for episode_num in range(test_episode):
             ep_reward = 0
             ep_len = 0
             obs = self.env.reset()
             while True:
                 with torch.no_grad():
-                    # simply convert to pytorch tensor or to TensorDict
+                    temp_1 = obs_as_tensor(t_1_info_test, self.device)
+                    temp_2 = obs_as_tensor(t_2_info_test, self.device)
                     obs_tensor = obs_as_tensor(obs, self.device)
-                    # TODO, need to be added with temporal information here, not urgent 
-                    action = self.policy.predict(obs_tensor)
+                    action = self.policy.predict(obs_tensor, temp_1, temp_2)
                 action = action.cpu().numpy()
-
-                #this can cause suboptimal action
                 action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
-
                 obs, reward, done, _ = self.env.step(action)
+
+                t_2_info_test = t_1_info_test
+                t_1_info_test = obs[0: 6]
+
                 if self.env.use_gui == True:
                     time.sleep(1./240.)
                 ep_reward += reward
                 ep_len += 1
                 if done:
-                    self.logger.record('episode_count', episode_count)
+                    self.logger.record('episode_num', episode_num)
                     self.logger.record('test/ep_len', ep_len)
                     self.logger.record('test/ep_reward', ep_reward)
                     self.logger.write_out()

@@ -214,7 +214,7 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         if mode == 'sample':
             return distribution.sample()
         elif mode =='deterministic':
-            return distribution.mean()
+            return distribution.mode()
 
     def predict_values(self, obs, t_1_info, t_2_info):
         if obs.dim() == 2:
@@ -242,11 +242,13 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         return values, log_prob, distribution.entropy()
 
     def predict(self, obs, t_1_info, t_2_info):
-        shared_latent = torch.tanh(self.common_layer(obs))
-
+        # actor network
+        features = self.gnn_process(obs, t_1_info, t_2_info)
+        shared_latent = torch.tanh(self.common_layer(features))
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
-        actions = self.action_net(latent_pi)
-
+        distributions = self._get_action_dist_from_latent(latent_pi)
+        actions = self.get_actions(distributions, mode='deterministic')
+        print(distributions.distribution)
         return actions
 
     def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
@@ -254,9 +256,7 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         target_poss = obss[:,6:]
         target_infos = torch.cat((target_poss,torch.zeros_like(target_poss),torch.zeros_like(target_poss)),dim=1)
         nodes_infos = torch.stack((target_infos, t_1_infos, t_2_infos, obss[:, 0: 6]),dim=1) # 6, 4, 6
-
         nodes_infos = torch.transpose(nodes_infos, 0, 1) # 4, 6, 6, nodes, batch, info
-
         graph_output = torch.tanh(self.gnn(nodes_infos)) # 4, 6, 2
         # print('3:', graph_output)
         graph_output = torch.transpose(graph_output, 0, 1) # 6, 4, 2
@@ -268,7 +268,8 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
     def gnn_process(self, obs, t_1_info, t_2_info):
         target_pos = obs[6:]
         target_info = torch.cat((target_pos,torch.zeros_like(target_pos),torch.zeros_like(target_pos)))
-        node_info = torch.cat((target_info, t_1_info, t_2_info, obs[0: 6])).view(4, 6) # 4, 6
+        # print(target_info.shape, t_1_info.shape, t_2_info.shape, obs[0: 6].shape)
+        node_info = torch.cat((target_info, t_1_info.squeeze(), t_2_info.squeeze(), obs[0: 6])).view(4, 6) # 4, 6
         # print('6:', node_info)
         features = torch.tanh(self.gnn(node_info)).flatten() # 4, 2
         # print('7:', features)

@@ -151,7 +151,7 @@ class PPO():
             self.logger.record("rollout/success_rate", success_rate)
             self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
             self.logger.record("rollout/ep_num_success", ep_num_success)
-            self.logger.record("rollout/ep_len_mean", np.mean(rollout_ep_len))
+            self.logger.to_tensorboard(name='Episode_length_mean', data=np.mean(rollout_ep_len), time_count=self.num_timesteps)
             self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
             self.logger.to_tensorboard(name='Success_rate', data=success_rate, time_count=self.num_timesteps)
             self.logger.close()
