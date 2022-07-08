@@ -262,7 +262,7 @@ class RolloutBuffer():
             shape = shape + (1,)
         return arr.swapaxes(0, 1).reshape(shape[0] * shape[1], *shape[2:])
 
-class Temp_RolloutBuffer():
+class Temp_2_RolloutBuffer():
     """
     Rollout buffer used in on-policy algorithms like A2C/PPO.
     It corresponds to ``buffer_size`` transitions collected
@@ -470,29 +470,7 @@ class Temp_RolloutBuffer():
             shape = shape + (1,)
         return arr.swapaxes(0, 1).reshape(shape[0] * shape[1], *shape[2:])
 
-class Temp_2_RolloutBuffer():
-    """
-    Rollout buffer used in on-policy algorithms like A2C/PPO.
-    It corresponds to ``buffer_size`` transitions collected
-    using the current policy.
-    This experience will be discarded after the policy update.
-    In order to use PPO objective, we also store the current value of each state
-    and the log probability of each taken action.
-
-    The term rollout here refers to the model-free notion and should not
-    be used with the concept of rollout used in model-based RL or planning.
-    Hence, it is only involved in policy and value function training but not action selection.
-
-    :param buffer_size: Max number of element in the buffer
-    :param observation_space: Observation space
-    :param action_space: Action space
-    :param device:
-    :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-        Equivalent to classic advantage when set to 1.
-    :param gamma: Discount factor
-    :param n_envs: Number of parallel environments
-    """
-
+class Temp_RolloutBuffer():
     def __init__(
         self,
         buffer_size,

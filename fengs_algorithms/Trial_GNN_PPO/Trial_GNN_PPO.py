@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 from fengs_algorithms.Trial_GNN_PPO.Trial_GNN_policies_distribution import Trial_GNN_ActorCriticPolicy
-from fengs_algorithms.common.buffer import Temp_2_RolloutBuffer
+from fengs_algorithms.common.buffer import Temp_RolloutBuffer
 from fengs_algorithms.common.utils import obs_as_tensor, Logger
 
 class Trial_GNN_PPO():
@@ -25,7 +25,7 @@ class Trial_GNN_PPO():
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
         experiment_name = 'Trial_GNN_PPO',
-        buffer_cls = Temp_2_RolloutBuffer,
+        buffer_cls = Temp_RolloutBuffer,
         logger = Logger,
         save_model_name = 'Trial_GNN_PPO',
         parallel = True

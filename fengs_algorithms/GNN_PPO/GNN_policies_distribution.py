@@ -243,24 +243,27 @@ class GNN_ActorCriticPolicy(nn.Module):
 
     def predict(self, obs, t_1_info, t_2_info):
         # actor network
-        features = self.batch_gnn_process(obs, t_1_info, t_2_info)
+        features = self.gnn_process(obs, t_1_info, t_2_info)
         shared_latent = torch.tanh(self.common_layer(features))
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode='deterministic')
-
         return actions
 
     def batch_gnn_process(self, obss, t_1_infos, t_2_infos):
-        nodes_info = torch.stack((obss[:,6:], t_1_infos, t_2_infos, obss[:, 0: 2]),dim=1) # 6, 4, 2
-        nodes_info = torch.transpose(nodes_info, 0, 1) # 4, 6, 2, nodes, batch, info
-        graph_output = torch.tanh(self.gnn(nodes_info)).T # 4, 6, 1 ---> 6, 4
-        features = torch.cat((graph_output, obss[:, 2: 6]), dim=1) # 6, 8
-        
+        # For test
+        target_poss = obss[:,6:]
+        target_infos = torch.cat((target_poss,torch.zeros_like(target_poss),torch.zeros_like(target_poss)),dim=1)
+        nodes_infos = torch.stack((target_infos, t_1_infos, t_2_infos, obss[:, 0: 6]),dim=1) # 6, 4, 6
+        nodes_infos = torch.transpose(nodes_infos, 0, 1) # 4, 6, 6, nodes, batch, info
+        graph_output = torch.tanh(self.gnn(nodes_infos)) # 4, 6, 2
+        graph_output = torch.transpose(graph_output, 0, 1) # 6, 4, 2
+        features = torch.flatten(graph_output, start_dim=1) # 6, 8
         return features     
 
     def gnn_process(self, obs, t_1_info, t_2_info):
-        node_info = torch.cat((obs[6:], t_1_info, t_2_info, obs[0: 2])).view(4, 2)
-        graph_output = torch.tanh(self.gnn(node_info))
-        features = torch.cat((graph_output, obs[2: 6]))
+        target_pos = obs[6:]
+        target_info = torch.cat((target_pos,torch.zeros_like(target_pos),torch.zeros_like(target_pos)))
+        node_info = torch.cat((target_info, t_1_info.squeeze(), t_2_info.squeeze(), obs[0: 6])).view(4, 6) # 4, 6
+        features = torch.tanh(self.gnn(node_info)).flatten() # 4, 2
         return features     

@@ -158,8 +158,8 @@ class GNN(nn.Module):
                 graph,
             ):
         super(GNN, self).__init__()
-        self.layer1 = GNN_Layer(in_feat, 8, graph)
-        self.layer2 = GNN_Layer(8, out_feat, graph)
+        self.layer1 = GNN_Layer(in_feat, 4, graph)
+        self.layer2 = GNN_Layer(4, out_feat, graph)
 
     def forward(self, features):
         x = torch.tanh(self.layer1(features))
@@ -199,7 +199,7 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
-
+        
         # critic network
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
@@ -248,7 +248,6 @@ class Trial_GNN_ActorCriticPolicy(nn.Module):
         latent_pi = torch.tanh(self.actor_latent_layer(shared_latent))
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode='deterministic')
-        print(distributions.distribution)
         return actions
 
     def batch_gnn_process(self, obss, t_1_infos, t_2_infos):

@@ -21,7 +21,6 @@ class PPO():
         clip_range: float = 0.2,
         ent_coef: float= 0.0,
         ac_lr: float = 3e-4,
-        gnn_lr: float = 0.001,
         vf_coef: float = 0.5,
         batch_size: int = 64,
         max_grad_norm: float = 0.5,
@@ -43,7 +42,6 @@ class PPO():
         self.clip_range = clip_range
         self.ent_coef = ent_coef
         self.ac_lr = ac_lr
-        self.gnn_lr = gnn_lr
         self.vf_coef = vf_coef
         self.gae_lambda = gae_lambda
         self.experiment_name = experiment_name
