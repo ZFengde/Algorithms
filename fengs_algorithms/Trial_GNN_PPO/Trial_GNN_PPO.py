@@ -72,10 +72,8 @@ class Trial_GNN_PPO():
         self.num_timesteps = 0
         self._n_updates = 0 
         
-        # self.policy_optim = Adam([
-        #                         {'params': self.policy.gnn.parameters(), 'lr': 1e-3},
-        #                         ], lr=3e-4, eps=1e-5)
-        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
+        # self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
+        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr)
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
@@ -163,9 +161,9 @@ class Trial_GNN_PPO():
             self.logger.record("rollout/success_rate", success_rate)
             self.logger.record("rollout/ep_num_rollout", ep_num_rollout)
             self.logger.record("rollout/ep_num_success", ep_num_success)
-            self.logger.to_tensorboard(name='Episode_length_mean', data=np.mean(rollout_ep_len), time_count=self.num_timesteps)
-            self.logger.to_tensorboard(name='Episode_reward_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
-            self.logger.to_tensorboard(name='Success_rate', data=success_rate, time_count=self.num_timesteps)
+            self.logger.to_tensorboard(name='rollout/ep_len_mean', data=np.mean(rollout_ep_len), time_count=self.num_timesteps)
+            self.logger.to_tensorboard(name='rollout/ep_rew_mean', data=np.mean(rollout_ep_rewards), time_count=self.num_timesteps)
+            self.logger.to_tensorboard(name='rollout/success_rate', data=success_rate, time_count=self.num_timesteps)
             self.logger.close()
         self.logger.record('rollout/timesteps_so_far', self.num_timesteps)
 
