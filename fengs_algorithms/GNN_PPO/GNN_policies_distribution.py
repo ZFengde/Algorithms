@@ -1,4 +1,4 @@
-# this policy store the best GNN PPO policy so far
+# best GNN so far
 import dgl
 import dgl.function as fn
 import torch
@@ -121,14 +121,12 @@ class GNN_Layer(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.loop_weight, gain=nn.init.calculate_gain('relu'))
+        nn.init.xavier_uniform_(self.loop_weight, gain=nn.init.calculate_gain('tanh'))
         nn.init.uniform_(self.W, -1/math.sqrt(self.in_feat), 1/math.sqrt(self.in_feat))
         nn.init.zeros_(self.m_bias)
         nn.init.zeros_(self.h_bias)
 
     def message(self, edges):
-        # W: num_edges, in_feat, out_feat
-        # edges.src['h']: num_edges, batch/1(no batch), in_feat
         if edges.src['h'].dim() == 2:
             x = edges.src['h'].view(-1, 1, self.in_feat)
             message = torch.bmm(x, self.W) + self.m_bias
@@ -158,32 +156,32 @@ class GNN(nn.Module):
                 graph,
             ):
         super(GNN, self).__init__()
-        self.layer1 = GNN_Layer(in_feat, 4, graph)
-        self.layer2 = GNN_Layer(4, out_feat, graph)
+        self.layer1 = GNN_Layer(in_feat, 8, graph)
+        self.layer2 = GNN_Layer(8, out_feat, graph)
 
     def forward(self, features):
         x = torch.tanh(self.layer1(features))
         x = self.layer2(x)
         return x
 
-class GNN_ActorCriticPolicy(nn.Module):
+class Trial_GNN_ActorCriticPolicy(nn.Module):
     def __init__(
         self, 
-        node_input_dim: int,
-        node_output_dim: int,
-        actor_output_dim : int, 
+        node_input_dim: int = 6,
+        node_output_dim: int = 8,
+        actor_output_dim : int = 2, 
         device = None,
         log_std_init = 0.0, # according to the StateDependentNoiseDistribution class from baseline3
     ):
-        super(GNN_ActorCriticPolicy, self).__init__()
+        super(Trial_GNN_ActorCriticPolicy, self).__init__()
         self.device = device
-        src_ids = torch.tensor([0, 0, 0, 1, 1, 2])
+        src_ids = torch.tensor([0, 0, 0, 1, 2, 1])
         dst_ids = torch.tensor([1, 2, 3, 2, 3, 3])
         self.g = dgl.graph((src_ids, dst_ids)).to(device)
         self.log_std_init = log_std_init
 
         self.gnn = GNN(node_input_dim, node_output_dim, self.g)
-        self.common_layer = nn.Linear(8, 64)
+        self.common_layer = nn.Linear(32, 64)
         self.actor_latent_layer = nn.Linear(64, 64)
         self.action_dist = DiagGaussianDistribution(action_dim=actor_output_dim)
         self.action_net, self.log_std = self.action_dist.proba_distribution_net(
@@ -199,7 +197,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         distributions = self._get_action_dist_from_latent(latent_pi)
         actions = self.get_actions(distributions, mode=mode)
         log_probs = distributions.log_prob(actions)
-
+        
         # critic network
         latent_vf = torch.tanh(self.critic_latent_layer(shared_latent))
         values = self.value_net(latent_vf)
@@ -214,7 +212,7 @@ class GNN_ActorCriticPolicy(nn.Module):
         if mode == 'sample':
             return distribution.sample()
         elif mode =='deterministic':
-            return distribution.mean()
+            return distribution.mode()
 
     def predict_values(self, obs, t_1_info, t_2_info):
         if obs.dim() == 2:

@@ -188,7 +188,6 @@ class PPO():
 
                 accumulative_loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
-                # TODO, GNN backprobagate here
                 self.policy_optim.zero_grad()
                 accumulative_loss.backward(retain_graph=True)
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)

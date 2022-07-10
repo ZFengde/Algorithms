@@ -63,17 +63,13 @@ class Trial_GNN_PPO():
         )
 
         self.policy = policy(
-            node_input_dim=6, 
-            node_output_dim=2, 
-            actor_output_dim=2,
             device=self.device).to(self.device)
 
         self.logger = logger(experiment_name, self.time)
         self.num_timesteps = 0
         self._n_updates = 0 
         
-        # self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
-        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr)
+        self.policy_optim = Adam(self.policy.parameters(), lr=self.ac_lr, eps=1e-5)
 
         self.episode_reward_buffer = np.zeros((self.n_envs,))
         self.episode_length_buffer = np.zeros((self.n_envs,))
