@@ -242,7 +242,7 @@ class Trial_GNN_PPO():
                     obs_tensor = obs_as_tensor(obs, self.device)
                     action = self.policy.predict(obs_tensor, temp_1, temp_2)
                 action = action.cpu().numpy()
-                action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+                action = np.clip(action, -1.5, 1.5)
                 obs, reward, done, _ = self.env.step(action)
 
                 t_2_info_test = t_1_info_test
